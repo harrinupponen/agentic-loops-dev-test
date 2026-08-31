@@ -170,7 +170,11 @@ jobs:
         run: node scripts/ci/migration-safety.mjs origin/${{ github.base_ref }}
 
       - name: Dependency audit
-        run: npm audit --audit-level=high
+        # Scoped to what actually ships: dev-only advisories here are all in
+        # vitest/vite's UI dev-server code path, which nothing in this repo
+        # ever starts (no --ui flag anywhere). --omit=dev keeps the gate
+        # meaningful instead of blocking on an unreachable attack surface.
+        run: npm audit --omit=dev --audit-level=high
 
       - uses: actions/upload-artifact@v4
         if: always()

@@ -51,7 +51,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # NODE_ENV=production is set above for the app under test, but npm
+      # reads it too and silently omits devDependencies (playwright, tsx,
+      # typescript, ...) unless told otherwise.
+      - run: npm ci --include=dev
       - run: mkdir -p .ci/reports
 
       - name: Cache Playwright browsers
@@ -126,7 +129,10 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # NODE_ENV=production is set above for the app under test, but npm
+      # reads it too and silently omits devDependencies (playwright, tsx,
+      # typescript, ...) unless told otherwise.
+      - run: npm ci --include=dev
       - run: mkdir -p .ci/reports
       - run: npm run build
       - run: npm run db:migrate

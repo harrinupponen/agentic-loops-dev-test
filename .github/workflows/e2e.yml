@@ -43,7 +43,12 @@ jobs:
     env:
       DATABASE_URL: postgres://app:app@localhost:5432/app_e2e
       COOKIE_SECRET: e2e-cookie-secret-that-is-long-enough-x
-      NODE_ENV: production
+      # Not "production": setSessionCookie sets Secure when NODE_ENV is
+      # production, and this server is only reachable over plain HTTP here.
+      # A real browser client (Playwright's request context enforces this
+      # correctly, unlike k6) never sends a Secure cookie back over HTTP, so
+      # the very first authenticated request after login/register 401s.
+      NODE_ENV: test
       LOG_LEVEL: warn
     steps:
       - uses: actions/checkout@v4
@@ -119,7 +124,8 @@ jobs:
     env:
       DATABASE_URL: postgres://app:app@localhost:5432/app_load
       COOKIE_SECRET: load-cookie-secret-that-is-long-enough
-      NODE_ENV: production
+      # See the e2e job above: Secure cookies over plain HTTP never round-trip.
+      NODE_ENV: test
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '100000'
       AUTH_RATE_LIMIT_MAX: '100000'

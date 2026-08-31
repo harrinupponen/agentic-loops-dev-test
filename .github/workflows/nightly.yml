@@ -1,0 +1,65 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: Load soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_soak
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app_soak"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://app:app@localhost:5432/app_soak
+      COOKIE_SECRET: soak-cookie-secret-that-is-long-enough
+      NODE_ENV: production
+      LOG_LEVEL: error
+      RATE_LIMIT_MAX: '1000000'
+      DATABASE_POOL_MAX: '20'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+      - run: npm run build
+      - run: npm run db:migrate
+      - run: |
+          node dist/index.js &
+          echo $! > server.pid
+          npx wait-on http://127.0.0.1:3000/healthz -t 30000
+      - uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1
+      - run: k6 run --summary-export=.ci/reports/k6-soak.json load/soak.js
+      - if: always()
+        run: kill "$(cat server.pid)" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: soak-report, path: .ci/reports/ }
+
+  audit:
+    name: Dependency and container audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - run: npm audit --audit-level=moderate
+      - run: npx osv-scanner scan --lockfile=package-lock.json
+        continue-on-error: true

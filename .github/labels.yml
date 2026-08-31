@@ -1,0 +1,25 @@
+# Apply with: gh label create <name> --color <color> --description "<desc>"
+- name: needs-human
+  color: 'B60205'
+  description: Touches a sensitive path; a person must review before merge
+- name: agent:planning
+  color: '1D76DB'
+  description: Planner is writing the technical design
+- name: agent:implementing
+  color: '0E8A16'
+  description: Implementer is working on a branch
+- name: agent:review
+  color: 'FBCA04'
+  description: Awaiting automated review
+- name: agent:fixing
+  color: 'D93F0B'
+  description: Fixer is iterating on CI failures
+- name: agent:stuck
+  color: '5319E7'
+  description: Iteration cap reached; needs a human
+- name: run-e2e
+  color: 'C5DEF5'
+  description: Force the Tier 2 suite on a draft PR
+- name: spec-approved
+  color: '0E8A16'
+  description: Human approved the technical design; implementation may start

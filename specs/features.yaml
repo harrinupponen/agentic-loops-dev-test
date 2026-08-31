@@ -1,0 +1,114 @@
+# Machine-readable backlog. The orchestrator reads this to pick the next feature.
+# Prose lives in specs/features/F-XXX-*.md; this file is for scheduling only.
+#
+# status: todo | spec | spec-approved | in-progress | review | blocked | done
+# Only pick up a feature whose deps are all `done` and whose status is
+# `spec-approved` (implementation) or `todo` (planning).
+
+version: 1
+
+features:
+  - id: F-001
+    title: Walking skeleton — health, config, structured logging
+    spec: specs/features/F-001-walking-skeleton.md
+    status: done
+    deps: []
+    risk_tags: [infra]
+
+  - id: F-002
+    title: User registration and login with session cookies
+    spec: specs/features/F-002-authentication.md
+    status: done
+    deps: [F-001]
+    risk_tags: [auth, pii, security]
+
+  - id: F-003
+    title: Todo CRUD with keyset pagination
+    spec: specs/features/F-003-todo-crud.md
+    status: done
+    deps: [F-002]
+    risk_tags: []
+
+  - id: F-004
+    title: Password reset via emailed single-use token
+    spec: specs/features/F-004-password-reset.md
+    status: todo
+    deps: [F-002]
+    risk_tags: [auth, pii, security, email]
+
+  - id: F-005
+    title: Email verification on signup
+    spec: specs/features/F-005-email-verification.md
+    status: todo
+    deps: [F-004]
+    risk_tags: [auth, pii, email]
+
+  - id: F-006
+    title: Web UI — auth screens and todo list
+    spec: specs/features/F-006-web-ui.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [frontend]
+
+  - id: F-007
+    title: Idempotency keys for unsafe requests
+    spec: specs/features/F-007-idempotency.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [reliability]
+
+  - id: F-008
+    title: OpenTelemetry traces and RED dashboards
+    spec: specs/features/F-008-observability.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [infra, observability]
+
+  - id: F-009
+    title: Session management — list and revoke active sessions
+    spec: specs/features/F-009-session-management.md
+    status: todo
+    deps: [F-002]
+    risk_tags: [auth, security]
+
+  - id: F-010
+    title: Soft delete and restore for todos
+    spec: specs/features/F-010-soft-delete.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [migration]
+
+  - id: F-011
+    title: Distributed rate limiting backed by Redis
+    spec: specs/features/F-011-distributed-rate-limit.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [infra, security]
+
+  - id: F-012
+    title: Read-through cache for the todo list endpoint
+    spec: specs/features/F-012-caching.md
+    status: todo
+    deps: [F-011]
+    risk_tags: [infra, performance]
+
+  - id: F-013
+    title: Full-text search over todo titles
+    spec: specs/features/F-013-search.md
+    status: todo
+    deps: [F-003]
+    risk_tags: [performance, migration]
+
+  - id: F-014
+    title: Audit log for security-relevant events
+    spec: specs/features/F-014-audit-log.md
+    status: todo
+    deps: [F-009]
+    risk_tags: [security, pii, migration]
+
+  - id: F-015
+    title: Account deletion and data export (GDPR)
+    spec: specs/features/F-015-account-deletion.md
+    status: todo
+    deps: [F-014]
+    risk_tags: [pii, security, legal]

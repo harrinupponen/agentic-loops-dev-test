@@ -1,0 +1,7 @@
+dist/
+coverage/
+drizzle/
+.ci/reports/
+playwright-report/
+openapi.json
+package-lock.json

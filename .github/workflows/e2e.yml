@@ -1,0 +1,152 @@
+name: E2E
+
+# Tier 2 — heavier suite. Runs when the PR is actually ready, not on every
+# intermediate push from a fix loop.
+on:
+  pull_request:
+    types: [ready_for_review, labeled, synchronize]
+  push:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Playwright (shard ${{ matrix.shard }}/2)
+    # Skip while the PR is still a draft, unless explicitly labelled.
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.draft == false ||
+      contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_e2e
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app_e2e"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://app:app@localhost:5432/app_e2e
+      COOKIE_SECRET: e2e-cookie-secret-that-is-long-enough-x
+      NODE_ENV: production
+      LOG_LEVEL: warn
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: pw-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      - run: npx playwright install --with-deps chromium
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+
+      - run: npm run build
+      - run: npm run db:migrate
+      - run: npx playwright test --shard=${{ matrix.shard }}/2
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-e2e-${{ matrix.shard }}
+          path: |
+            .ci/reports/
+            playwright-report/
+          retention-days: 7
+
+  security:
+    name: Static security analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep
+        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v1
+        with:
+          config: >-
+            p/typescript
+            p/nodejs
+            p/owasp-top-ten
+            p/secrets
+
+  load:
+    name: Load smoke (k6)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.draft == false
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_load
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app_load"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://app:app@localhost:5432/app_load
+      COOKIE_SECRET: load-cookie-secret-that-is-long-enough
+      NODE_ENV: production
+      LOG_LEVEL: error
+      RATE_LIMIT_MAX: '100000'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+      - run: npm run build
+      - run: npm run db:migrate
+
+      - name: Start server
+        run: |
+          node dist/index.js &
+          echo $! > server.pid
+          npx wait-on http://127.0.0.1:3000/healthz -t 30000
+
+      - uses: grafana/setup-k6-action@ffe7d7290dfa715e48c2ccc924d068444c94bde2 # v1
+      - name: Run k6 smoke
+        run: k6 run --summary-export=.ci/reports/k6-summary.json load/smoke.js
+
+      - name: Stop server
+        if: always()
+        run: kill "$(cat server.pid)" || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-load
+          path: .ci/reports/
+          retention-days: 7

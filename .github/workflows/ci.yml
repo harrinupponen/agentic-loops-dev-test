@@ -1,0 +1,252 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Agents push in bursts; cancel superseded runs so the queue stays short.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------- Tier 0 ---
+  # Target: under 90 seconds. Fails fast on everything cheap.
+  tier0:
+    name: Tier 0 · lint, types, unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+
+      - name: Format
+        run: npm run format:check
+
+      - name: Lint
+        run: |
+          # Machine-readable copy first (never fails the step), then the real gate.
+          npx eslint . -f json -o .ci/reports/eslint.json || true
+          npx eslint . --max-warnings=0
+
+      - name: Typecheck
+        run: |
+          set +e
+          npx tsc --noEmit 2>&1 | tee .ci/reports/tsc.txt
+          exit "${PIPESTATUS[0]}"
+
+      - name: Unit tests
+        run: >-
+          npx vitest run --project unit --coverage
+          --reporter=default --reporter=json
+          --outputFile.json=.ci/reports/vitest-unit.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-tier0
+          path: .ci/reports/
+          retention-days: 7
+
+  # ---------------------------------------------------------------- Tier 1 ---
+  # Target: under 8 minutes. Real Postgres, no mocks.
+  tier1:
+    name: Tier 1 · integration, contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://app:app@localhost:5432/app_test
+      COOKIE_SECRET: ci-cookie-secret-that-is-long-enough-xx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+
+      - name: Integration tests
+        run: >-
+          npx vitest run --project integration
+          --reporter=default --reporter=json
+          --outputFile.json=.ci/reports/vitest-integration.json
+
+      - name: OpenAPI contract is up to date
+        run: npm run openapi:check
+
+      - name: Production build
+        run: npm run build
+
+      - name: Bundle size budget
+        run: |
+          SIZE=$(du -sk dist | cut -f1)
+          echo "dist = ${SIZE} KiB"
+          if [ "$SIZE" -gt 2048 ]; then
+            echo "::error::dist grew to ${SIZE} KiB (budget 2048 KiB)"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-tier1
+          path: .ci/reports/
+          retention-days: 7
+
+  # ----------------------------------------------------------------- Guards ---
+  guards:
+    name: Guards · tests, migrations, secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [tier0]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: reports-tier0
+          path: .ci/reports/
+        continue-on-error: true
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.7
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: No disabled or deleted tests
+        run: node scripts/ci/test-integrity.mjs
+
+      - name: Migration safety (expand/contract)
+        if: github.event_name == 'pull_request'
+        run: node scripts/ci/migration-safety.mjs origin/${{ github.base_ref }}
+
+      - name: Dependency audit
+        run: npm audit --audit-level=high
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reports-guards
+          path: .ci/reports/
+          retention-days: 7
+
+  # -------------------------------------------------------------- Human gate ---
+  human-gate:
+    name: Sensitive path check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        run: |
+          REASONS=$(node scripts/ci/sensitive-paths.mjs origin/${{ github.base_ref }})
+          {
+            echo "reasons<<REASONS_EOF"
+            echo "$REASONS"
+            echo "REASONS_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Apply needs-human label
+        if: steps.check.outputs.reasons != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REASONS: ${{ steps.check.outputs.reasons }}
+        run: |
+          gh pr edit "${{ github.event.pull_request.number }}" --add-label needs-human
+          {
+            echo "### Human review required"
+            echo ""
+            echo "This PR touches paths that always need a person:"
+            echo ""
+            printf '%s\n' "$REASONS" | sed 's/^/- /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove needs-human label
+        if: steps.check.outputs.reasons == ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh pr edit ${{ github.event.pull_request.number }} --remove-label needs-human || true
+
+  # -------------------------------------------------------------- Summarize ---
+  # The one artifact the fixer agent reads. Always runs, even on failure.
+  summarize:
+    name: Summarize failures
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [tier0, tier1, guards]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - uses: actions/download-artifact@v4
+        with:
+          path: .ci/all-reports
+          merge-multiple: true
+        continue-on-error: true
+      - run: node scripts/ci/summarize-ci.mjs .ci/all-reports > ci-failures.json
+      - name: Render summary
+        run: |
+          COUNT=$(jq -r '.failureCount' ci-failures.json)
+          echo "### CI findings: $COUNT" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$COUNT" != "0" ]; then
+            echo '```json' >> "$GITHUB_STEP_SUMMARY"
+            head -c 40000 ci-failures.json >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ci-failures
+          path: ci-failures.json
+          retention-days: 14
+
+  # Single required check, so branch protection needs one entry that never
+  # goes stale as jobs are added or renamed.
+  ci-passed:
+    name: CI passed
+    runs-on: ubuntu-latest
+    if: always()
+    needs: [tier0, tier1, guards]
+    steps:
+      - run: |
+          if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi
+          echo "All CI jobs passed."

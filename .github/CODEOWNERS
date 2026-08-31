@@ -1,0 +1,28 @@
+# Everything has a default owner so nothing merges unreviewed.
+# Replace @your-github-handle before first use.
+*                           @your-github-handle
+
+# --- Paths that must never be changed by an agent without a human ------------
+# Enable "Require review from Code Owners" in branch protection or these are
+# decorative. An agent stuck in a fix loop will otherwise "fix" the gate itself.
+
+/.github/                   @your-github-handle
+/scripts/ci/                @your-github-handle
+/vitest.config.ts           @your-github-handle
+/playwright.config.ts       @your-github-handle
+/eslint.config.js           @your-github-handle
+/.ci/test-baseline.json     @your-github-handle
+
+# Security-critical application code
+/src/plugins/auth.ts        @your-github-handle
+/src/routes/auth.ts         @your-github-handle
+/src/lib/password.ts        @your-github-handle
+/src/lib/session.ts         @your-github-handle
+
+# Data and infrastructure
+/drizzle/                   @your-github-handle
+/src/db/schema.ts           @your-github-handle
+/Dockerfile                 @your-github-handle
+/scripts/docker-entrypoint.sh  @your-github-handle
+/package-lock.json          @your-github-handle
+/openapi.json               @your-github-handle

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+.ci/reports/
+playwright-report/
+test-results/
+*.log
+.env
+.env.local
+.DS_Store

@@ -1,0 +1,192 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Never run two deploys at once, and never cancel one midway.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+# NOTE: sevalla-hosting/sevalla-deploy is pinned to a tag below. Before relying
+# on this pipeline, replace each tag with the commit SHA it points at:
+#   gh api repos/sevalla-hosting/sevalla-deploy/git/ref/tags/v2.0.0 --jq .object.sha
+# A tag is mutable; a third-party action running with repository secrets should
+# not be.
+
+jobs:
+  # Sevalla builds the real image from the Dockerfile itself. We build the same
+  # Dockerfile here purely to scan it — the artifact is discarded. Pin the base
+  # image by digest so the two builds stay equivalent.
+  scan-image:
+    name: Build and scan image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: agentic-todo:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy
+        uses: aquasecurity/trivy-action@dc5a429b52fcf669ce959baa2c2dd26090d2a6c4 # 0.32.0
+        with:
+          image-ref: agentic-todo:scan
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+
+  staging:
+    name: Deploy staging
+    runs-on: ubuntu-latest
+    needs: [scan-image]
+    timeout-minutes: 25
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+
+      # Migrations run inside the container at start (scripts/docker-entrypoint.sh),
+      # so there is no separate migrate step here. A failed migration means the
+      # container never becomes ready and Sevalla keeps the old revision.
+      - name: Deploy to Sevalla (staging)
+        uses: sevalla-hosting/sevalla-deploy@v2.0.0
+        with:
+          action: deploy-app
+          sevalla-token: ${{ secrets.SEVALLA_TOKEN }}
+          app-id: ${{ vars.SEVALLA_STAGING_APP_ID }}
+          branch: main
+          wait-for-finish: true
+
+      - name: Smoke test staging
+        env:
+          E2E_BASE_URL: ${{ vars.STAGING_URL }}
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+  production:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    needs: [staging]
+    timeout-minutes: 30
+    # Add required reviewers to this environment in repo settings.
+    # That approval button is the human deploy gate.
+    environment:
+      name: production
+      url: ${{ vars.PRODUCTION_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Sevalla CLI
+        run: npm install -g @sevalla/cli
+
+      # Capture what is live now, so a failed verification has something to roll
+      # back to rather than guessing.
+      - name: Record current deployment
+        id: current
+        env:
+          SEVALLA_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
+        run: |
+          ID=$(sevalla apps deployments list --app-id "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" --output json \
+            | jq -r '[.data[] | select(.status == "success")][0].id')
+          echo "Currently deployed: $ID"
+          echo "deployment-id=$ID" >> "$GITHUB_OUTPUT"
+
+      # Promote reuses the artifact that just passed the staging smoke tests
+      # instead of rebuilding, so what ships is what was verified.
+      - name: Promote staging to production
+        uses: sevalla-hosting/sevalla-deploy@v2.0.0
+        with:
+          action: promote-app
+          sevalla-token: ${{ secrets.SEVALLA_TOKEN }}
+          pipeline-id: ${{ vars.SEVALLA_PIPELINE_ID }}
+          source-app-id: ${{ vars.SEVALLA_STAGING_APP_ID }}
+          target-app-ids: ${{ vars.SEVALLA_PRODUCTION_APP_ID }}
+          wait-for-finish: true
+
+      - name: Post-deploy verification
+        id: verify
+        env:
+          BASE: ${{ vars.PRODUCTION_URL }}
+        run: |
+          set -e
+          for i in $(seq 1 30); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/readyz" || true)
+            [ "$CODE" = "200" ] && { echo "ready"; break; }
+            [ "$i" = "30" ] && { echo "::error::never became ready"; exit 1; }
+            sleep 5
+          done
+          # Error-rate probe. Tolerate nothing: a single 5xx here means the
+          # rollout is worse than what it replaced.
+          FAILS=0
+          for _ in $(seq 1 50); do
+            CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/healthz" || true)
+            [ "$CODE" = "200" ] || FAILS=$((FAILS+1))
+          done
+          echo "failures=$FAILS"
+          [ "$FAILS" -eq 0 ]
+
+      - name: Roll back on failed verification
+        if: failure() && steps.verify.conclusion == 'failure'
+        env:
+          SEVALLA_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
+        run: |
+          echo "::error::Verification failed — rolling back to ${{ steps.current.outputs.deployment-id }}"
+          sevalla apps deployments rollback "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" \
+            --deployment-id "${{ steps.current.outputs.deployment-id }}"
+
+  baseline:
+    name: Update test baseline
+    runs-on: ubuntu-latest
+    needs: [production]
+    permissions:
+      contents: write
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+          POSTGRES_DB: app_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U app -d app_test"
+          --health-interval 2s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgres://app:app@localhost:5432/app_test
+      COOKIE_SECRET: ci-cookie-secret-that-is-long-enough-xx
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: npm }
+      - run: npm ci
+      - run: mkdir -p .ci/reports
+      - run: >-
+          npx vitest run
+          --reporter=default --reporter=json
+          --outputFile.json=.ci/reports/vitest-all.json
+      - run: npm run ci:baseline
+      - name: Commit if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git diff --quiet .ci/test-baseline.json; then
+            git add .ci/test-baseline.json
+            git commit -m "chore: update test baseline [skip ci]"
+            git push
+          fi

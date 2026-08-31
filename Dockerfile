@@ -23,6 +23,11 @@ FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 RUN groupadd -r app && useradd -r -g app app
+# The entrypoint below only ever calls `node`, never npm/npx — but the base
+# image ships them anyway, and their own bundled dependencies (not ours) are
+# what the image scan actually flags. Strip them so there's nothing there to
+# have a CVE in.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

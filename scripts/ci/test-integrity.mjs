@@ -86,9 +86,10 @@ if (count < baseline.testCount) {
   });
 }
 
-await writeFile(REPORT, JSON.stringify({ tool: 'test-integrity', testCount: count, violations }, null, 2)).catch(
-  () => undefined,
-);
+await writeFile(
+  REPORT,
+  JSON.stringify({ tool: 'test-integrity', testCount: count, violations }, null, 2),
+).catch(() => undefined);
 
 if (violations.length) {
   console.error(`test-integrity: ${violations.length} violation(s)`);

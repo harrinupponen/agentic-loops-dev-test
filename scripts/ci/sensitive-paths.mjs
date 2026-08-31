@@ -21,7 +21,10 @@ const RULES = [
   [/^scripts\/ci\//, 'CI gate scripts'],
   [/^Dockerfile$|^docker-compose\.yml$|^scripts\/docker-entrypoint\.sh$/, 'infrastructure'],
   [/^package-lock\.json$/, 'dependency changes'],
-  [/^vitest\.config\.ts$|^playwright\.config\.ts$|^eslint\.config\.js$/, 'quality gate configuration'],
+  [
+    /^vitest\.config\.ts$|^playwright\.config\.ts$|^eslint\.config\.js$/,
+    'quality gate configuration',
+  ],
   [/^\.ci\/test-baseline\.json$/, 'test baseline'],
   [/^openapi\.json$/, 'public API contract'],
 ];

@@ -8,13 +8,13 @@ There are no AI features in the application. AI is how it gets built.
 
 ## What is here
 
-| Layer | What it does |
-| --- | --- |
-| **Application** | Fastify + Postgres + Drizzle. Sessions, todo CRUD, keyset pagination, rate limiting, metrics, graceful shutdown |
-| **Verification** | Vitest against real Postgres, Playwright E2E, k6 load thresholds, OpenAPI contract check |
-| **Guards** | Test-integrity, expand/contract migration safety, sensitive-path human gate, secret scanning |
-| **Pipeline** | Tiered GitHub Actions, normalised failure output, staging → promote → production with rollback |
-| **Loop** | `AGENTS.md`, four agent roles, machine-readable backlog, two mandatory human gates |
+| Layer            | What it does                                                                                                    |
+| ---------------- | --------------------------------------------------------------------------------------------------------------- |
+| **Application**  | Fastify + Postgres + Drizzle. Sessions, todo CRUD, keyset pagination, rate limiting, metrics, graceful shutdown |
+| **Verification** | Vitest against real Postgres, Playwright E2E, k6 load thresholds, OpenAPI contract check                        |
+| **Guards**       | Test-integrity, expand/contract migration safety, sensitive-path human gate, secret scanning                    |
+| **Pipeline**     | Tiered GitHub Actions, normalised failure output, staging → promote → production with rollback                  |
+| **Loop**         | `AGENTS.md`, four agent roles, machine-readable backlog, two mandatory human gates                              |
 
 ## Getting started
 

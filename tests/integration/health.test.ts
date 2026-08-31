@@ -14,13 +14,13 @@ describe('health', () => {
   it('reports liveness without touching the database', async () => {
     const res = await ctx.app.inject({ url: '/healthz' });
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe('ok');
+    expect(res.json<{ status: string }>().status).toBe('ok');
   });
 
   it('reports readiness when the database answers', async () => {
     const res = await ctx.app.inject({ url: '/readyz' });
     expect(res.statusCode).toBe(200);
-    expect(res.json().status).toBe('ready');
+    expect(res.json<{ status: string }>().status).toBe('ready');
   });
 
   it('reports not ready once shutdown has begun', async () => {
@@ -28,7 +28,7 @@ describe('health', () => {
     const res = await ctx.app.inject({ url: '/readyz' });
     ctx.app.isShuttingDown = false;
     expect(res.statusCode).toBe(503);
-    expect(res.json().reason).toBe('shutting_down');
+    expect(res.json<{ reason: string }>().reason).toBe('shutting_down');
   });
 
   it('exposes prometheus metrics', async () => {

@@ -1,6 +1,7 @@
 ## Feature
 
 <!-- Link the spec: Implements `specs/features/F-XXX-*.md` -->
+
 Implements: `specs/features/F-XXX-....md`
 Closes: #
 
@@ -12,11 +13,11 @@ Closes: #
 
 ## Tests added
 
-| Layer | What it covers |
-| --- | --- |
-| unit |  |
-| integration |  |
-| e2e |  |
+| Layer       | What it covers |
+| ----------- | -------------- |
+| unit        |                |
+| integration |                |
+| e2e         |                |
 
 ## Self-review checklist
 

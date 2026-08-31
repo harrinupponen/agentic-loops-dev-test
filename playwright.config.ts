@@ -9,7 +9,11 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: process.env.CI
-    ? [['json', { outputFile: '.ci/reports/playwright.json' }], ['html', { open: 'never' }], ['line']]
+    ? [
+        ['json', { outputFile: '.ci/reports/playwright.json' }],
+        ['html', { open: 'never' }],
+        ['line'],
+      ]
     : [['list']],
   use: {
     baseURL,
@@ -21,7 +25,7 @@ export default defineConfig({
   webServer: process.env.E2E_BASE_URL
     ? undefined
     : {
-        command: 'npm run start',
+        command: 'node --env-file-if-exists=.env dist/index.js',
         url: 'http://127.0.0.1:3000/healthz',
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,

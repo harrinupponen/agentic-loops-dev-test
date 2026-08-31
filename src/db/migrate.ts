@@ -28,7 +28,9 @@ export async function runMigrations(connectionString: string): Promise<string[]>
     await client.query('SELECT pg_advisory_lock($1)', [LOCK_KEY]);
 
     const done = new Set(
-      (await client.query<{ name: string }>('SELECT name FROM _migrations')).rows.map((r) => r.name),
+      (await client.query<{ name: string }>('SELECT name FROM _migrations')).rows.map(
+        (r) => r.name,
+      ),
     );
     const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql')).sort();
 

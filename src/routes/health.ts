@@ -19,7 +19,7 @@ export function registerHealthRoutes(app: FastifyInstance, db: Database) {
         response: { 200: z.object({ status: z.literal('ok'), uptime: z.number() }) },
       },
     },
-    async () => ({ status: 'ok' as const, uptime: process.uptime() }),
+    () => ({ status: 'ok' as const, uptime: process.uptime() }),
   );
 
   // Readiness: safe to route traffic here. Checked by the load balancer.

@@ -52,12 +52,12 @@ path, and support has no safe way to help them without handling credentials.
 
 ## Test plan
 
-| Layer | Cases |
-| --- | --- |
-| unit | token generation, hashing, expiry arithmetic |
+| Layer       | Cases                                                                                 |
+| ----------- | ------------------------------------------------------------------------------------- |
+| unit        | token generation, hashing, expiry arithmetic                                          |
 | integration | full reset flow · replay · expiry · unknown email · session invalidation · rate limit |
-| e2e | forgot password → reset → log in with the new password |
-| load | not a hot path; no thresholds |
+| e2e         | forgot password → reset → log in with the new password                                |
+| load        | not a hot path; no thresholds                                                         |
 
 ## Security considerations
 

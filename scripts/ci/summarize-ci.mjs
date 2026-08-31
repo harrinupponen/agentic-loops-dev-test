@@ -56,7 +56,14 @@ for (const line of (tsc ?? '').split('\n')) {
   // src/app.ts(12,5): error TS2345: Argument of type ...
   const m = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/.exec(line.trim());
   if (!m) continue;
-  push({ tool: 'tsc', file: m[1], line: Number(m[2]), column: Number(m[3]), rule: m[4], message: m[5] });
+  push({
+    tool: 'tsc',
+    file: m[1],
+    line: Number(m[2]),
+    column: Number(m[3]),
+    rule: m[4],
+    message: m[5],
+  });
 }
 
 // --- vitest -----------------------------------------------------------------
@@ -84,7 +91,9 @@ if (pw) {
     for (const suite of suites ?? []) {
       for (const spec of suite.specs ?? []) {
         for (const test of spec.tests ?? []) {
-          const failed = (test.results ?? []).some((r) => r.status === 'failed' || r.status === 'timedOut');
+          const failed = (test.results ?? []).some(
+            (r) => r.status === 'failed' || r.status === 'timedOut',
+          );
           if (!failed) continue;
           push({
             tool: 'playwright',
@@ -149,7 +158,15 @@ function relative(p) {
   return String(p).replace(process.cwd() + '/', '');
 }
 function firstLine(s) {
-  return String(s).split('\n').slice(0, 4).join(' ').replace(/\u001b\[[0-9;]*m/g, '').slice(0, 500);
+  return (
+    String(s)
+      .split('\n')
+      .slice(0, 4)
+      .join(' ')
+      // eslint-disable-next-line no-control-regex -- stripping ANSI colour codes
+      .replace(/\u001b\[[0-9;]*m/g, '')
+      .slice(0, 500)
+  );
 }
 function countBy(items, fn) {
   return items.reduce((acc, item) => {

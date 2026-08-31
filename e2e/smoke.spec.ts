@@ -6,13 +6,16 @@ import { expect, test } from '@playwright/test';
  * Browser-level specs land in this directory alongside them once the UI exists.
  */
 
+type Todo = { id: string; completed: boolean };
+
 const password = 'correct-horse-battery-staple';
 const uniqueEmail = () => `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
 
 test('health endpoints respond', async ({ request }) => {
   const live = await request.get('/healthz');
   expect(live.ok()).toBeTruthy();
-  expect((await live.json()).status).toBe('ok');
+  const liveBody = (await live.json()) as { status: string };
+  expect(liveBody.status).toBe('ok');
 
   const ready = await request.get('/readyz');
   expect(ready.ok()).toBeTruthy();
@@ -26,13 +29,15 @@ test('a user can register, manage todos, and log out', async ({ request }) => {
 
   const created = await request.post('/api/todos', { data: { title: 'ship the pipeline' } });
   expect(created.status()).toBe(201);
-  const todo = await created.json();
+  const todo = (await created.json()) as Todo;
 
   const list = await request.get('/api/todos');
-  expect((await list.json()).items).toHaveLength(1);
+  const listBody = (await list.json()) as { items: Todo[] };
+  expect(listBody.items).toHaveLength(1);
 
   const patched = await request.patch(`/api/todos/${todo.id}`, { data: { completed: true } });
-  expect((await patched.json()).completed).toBe(true);
+  const patchedBody = (await patched.json()) as Todo;
+  expect(patchedBody.completed).toBe(true);
 
   const removed = await request.delete(`/api/todos/${todo.id}`);
   expect(removed.status()).toBe(204);

@@ -38,7 +38,8 @@ for (const m of migrations) {
       file: m.path,
       line: null,
       rule: 'immutable-migrations',
-      message: 'Applied migrations are append-only. Add a new migration instead of editing this one.',
+      message:
+        'Applied migrations are append-only. Add a new migration instead of editing this one.',
     });
   }
 }

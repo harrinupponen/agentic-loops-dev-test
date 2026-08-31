@@ -30,7 +30,7 @@ observed rejecting a bad PR.
 
 ## Phase 1 — One feature, fully supervised
 
-**Goal:** find out where agents actually fail on *this* codebase, before adding
+**Goal:** find out where agents actually fail on _this_ codebase, before adding
 machinery to handle failures you have only imagined.
 
 Build **F-006 (Web UI)** or **F-007 (Idempotency keys)** first — not F-004.
@@ -129,16 +129,16 @@ unreliable loop.
 The backlog is ordered so the genuinely instructive features come after the loop
 works, not before:
 
-| Feature | What it teaches |
-| --- | --- |
-| F-007 Idempotency | Exactly-once semantics over an at-least-once network |
-| F-009 Session management | Revocation, and why sessions beat JWTs (ADR 0004) |
-| F-010 Soft delete | Your first real expand/contract migration across four PRs |
-| F-011 Distributed rate limit | Per-instance state does not survive horizontal scaling |
-| F-012 Caching | Invalidation, and measuring whether it helped at all |
-| F-013 Search | Index design, and watching a k6 threshold catch a regression |
-| F-014 Audit log | Write-heavy tables, retention, PII |
-| F-015 Account deletion | Cascades, and deletion that is actually complete |
+| Feature                      | What it teaches                                              |
+| ---------------------------- | ------------------------------------------------------------ |
+| F-007 Idempotency            | Exactly-once semantics over an at-least-once network         |
+| F-009 Session management     | Revocation, and why sessions beat JWTs (ADR 0004)            |
+| F-010 Soft delete            | Your first real expand/contract migration across four PRs    |
+| F-011 Distributed rate limit | Per-instance state does not survive horizontal scaling       |
+| F-012 Caching                | Invalidation, and measuring whether it helped at all         |
+| F-013 Search                 | Index design, and watching a k6 threshold catch a regression |
+| F-014 Audit log              | Write-heavy tables, retention, PII                           |
+| F-015 Account deletion       | Cascades, and deletion that is actually complete             |
 
 **F-010 is the one to be deliberate about.** It is the first change that must
 cross four separate PRs and deploys — expand, migrate, switch, contract — and

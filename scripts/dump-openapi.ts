@@ -20,6 +20,7 @@ const config: Config = {
   LOG_LEVEL: 'fatal',
   RATE_LIMIT_MAX: 100,
   RATE_LIMIT_WINDOW: '1 minute',
+  AUTH_RATE_LIMIT_MAX: 10,
   TRUST_PROXY: false,
   ALLOWED_ORIGINS: '',
   SHUTDOWN_GRACE_MS: 0,

@@ -1,5 +1,5 @@
 import { eq } from 'drizzle-orm';
-import type { FastifyReply, FastifyRequest, preHandlerHookHandler } from 'fastify';
+import type { FastifyReply, FastifyRequest, preValidationHookHandler } from 'fastify';
 import type { Config } from '../config.js';
 import type { Database } from '../db/client.js';
 import { sessions, users } from '../db/schema.js';
@@ -85,7 +85,14 @@ export function createSessionLoader(db: Database) {
   };
 }
 
-export const requireAuth: preHandlerHookHandler = function requireAuth(request, _reply, done) {
+// preValidation, not onRequest: @fastify/rate-limit attaches its own hook to
+// each route's onRequest array, appending after whatever is already there. If
+// requireAuth lived at onRequest, its early rejection of an unauthenticated
+// request would short-circuit the chain and the rate-limit hook after it
+// would never run — exempting unauthenticated traffic from rate limiting.
+// preValidation still runs ahead of body-schema validation, so an
+// unauthenticated request never gets a free validation-error response either.
+export const requireAuth: preValidationHookHandler = function requireAuth(request, _reply, done) {
   if (!request.user) {
     done(unauthorized());
     return;

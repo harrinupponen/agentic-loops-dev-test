@@ -34,7 +34,7 @@ describe('auth', () => {
       payload: { email: 'dupe@example.com', password: 'correct-horse-battery-staple' },
     });
     expect(res.statusCode).toBe(409);
-    expect(res.json().error.code).toBe('email_taken');
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('email_taken');
   });
 
   it('rejects weak passwords before touching the database', async () => {
@@ -44,7 +44,7 @@ describe('auth', () => {
       payload: { email: 'weak@example.com', password: 'short' },
     });
     expect(res.statusCode).toBe(400);
-    expect(res.json().error.code).toBe('validation_failed');
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('validation_failed');
   });
 
   it('does not reveal whether an email exists on failed login', async () => {
@@ -61,7 +61,11 @@ describe('auth', () => {
     });
     expect(wrongPassword.statusCode).toBe(401);
     expect(unknownUser.statusCode).toBe(401);
-    expect(wrongPassword.json()).toEqual(unknownUser.json());
+    // requestId is unique per request, so compare only the response body that
+    // a caller would actually see repeated.
+    expect(wrongPassword.json<{ error: unknown }>().error).toEqual(
+      unknownUser.json<{ error: unknown }>().error,
+    );
   });
 
   it('returns the current user for an authenticated request', async () => {

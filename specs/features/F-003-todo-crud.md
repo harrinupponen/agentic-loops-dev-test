@@ -22,13 +22,13 @@ This is the core of the product and every later feature builds on it.
 
 ### API changes
 
-| Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
-| GET | `/api/todos` | session | `?limit=1..100&cursor=<ISO date>&completed=true\|false` |
-| POST | `/api/todos` | session | `{ title }`, 1–500 chars, trimmed |
-| GET | `/api/todos/:id` | session | 404 if not owned |
-| PATCH | `/api/todos/:id` | session | `{ title?, completed? }`, at least one required |
-| DELETE | `/api/todos/:id` | session | 204 on success |
+| Method | Path             | Auth    | Notes                                                   |
+| ------ | ---------------- | ------- | ------------------------------------------------------- |
+| GET    | `/api/todos`     | session | `?limit=1..100&cursor=<ISO date>&completed=true\|false` |
+| POST   | `/api/todos`     | session | `{ title }`, 1–500 chars, trimmed                       |
+| GET    | `/api/todos/:id` | session | 404 if not owned                                        |
+| PATCH  | `/api/todos/:id` | session | `{ title?, completed? }`, at least one required         |
+| DELETE | `/api/todos/:id` | session | 204 on success                                          |
 
 ### Data model changes
 
@@ -62,12 +62,12 @@ leaks the existence of other users' records to anyone enumerating uuids.
 
 ## Test plan
 
-| Layer | Cases |
-| --- | --- |
-| unit | none required — no pure logic beyond schema validation |
+| Layer       | Cases                                                                                                                                     |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| unit        | none required — no pure logic beyond schema validation                                                                                    |
 | integration | full CRUD round trip · all endpoints unauthenticated · cross-user isolation · pagination cursor stability · oversized title · empty patch |
-| e2e | register → create → list → complete → delete → logout |
-| load | `p(95) < 200ms` on list, `< 300ms` on create at 20 VUs |
+| e2e         | register → create → list → complete → delete → logout                                                                                     |
+| load        | `p(95) < 200ms` on list, `< 300ms` on create at 20 VUs                                                                                    |
 
 ## Security considerations
 

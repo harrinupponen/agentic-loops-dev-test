@@ -42,7 +42,7 @@ export default function () {
     JSON.stringify({ email, password: PASSWORD }),
     { headers: { 'Content-Type': 'application/json' }, tags: { endpoint: 'register' } },
   );
-  check(register, { 'registered': (r) => r.status === 201 });
+  check(register, { registered: (r) => r.status === 201 });
   if (register.status !== 201) return;
 
   const create = http.post(
@@ -50,13 +50,13 @@ export default function () {
     JSON.stringify({ title: `load test ${randomString(8)}` }),
     { headers: { 'Content-Type': 'application/json' }, jar, tags: { endpoint: 'create' } },
   );
-  check(create, { 'created': (r) => r.status === 201 });
+  check(create, { created: (r) => r.status === 201 });
 
   const list = http.get(`${BASE}/api/todos?limit=20`, { jar, tags: { endpoint: 'list' } });
-  check(list, { 'listed': (r) => r.status === 200 });
+  check(list, { listed: (r) => r.status === 200 });
 
   const health = http.get(`${BASE}/healthz`, { tags: { endpoint: 'health' } });
-  check(health, { 'healthy': (r) => r.status === 200 });
+  check(health, { healthy: (r) => r.status === 200 });
 
   sleep(1);
 }

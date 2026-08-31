@@ -64,7 +64,7 @@ describe('todos', () => {
     expect(gone.statusCode).toBe(404);
   });
 
-  it('never leaks another user\'s todo', async () => {
+  it("never leaks another user's todo", async () => {
     const alice = await registerUser(ctx.app, 'alice@example.com');
     const bob = await registerUser(ctx.app, 'bob@example.com');
     const secret = await createTodo(alice.cookie, 'alice private note');
@@ -77,7 +77,7 @@ describe('todos', () => {
     expect(read.statusCode).toBe(404);
 
     const list = await ctx.app.inject({ url: '/api/todos', headers: { cookie: bob.cookie } });
-    expect(list.json().items).toHaveLength(0);
+    expect(list.json<{ items: unknown[] }>().items).toHaveLength(0);
   });
 
   it('paginates with a stable keyset cursor', async () => {

@@ -59,8 +59,11 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
   app.setSerializerCompiler(serializerCompiler);
 
   await app.register(helmet, {
-    contentSecurityPolicy: { directives: { 'default-src': ["'self'"], 'frame-ancestors': ["'none'"] } },
-    hsts: config.NODE_ENV === 'production' ? { maxAge: 31_536_000, includeSubDomains: true } : false,
+    contentSecurityPolicy: {
+      directives: { 'default-src': ["'self'"], 'frame-ancestors': ["'none'"] },
+    },
+    hsts:
+      config.NODE_ENV === 'production' ? { maxAge: 31_536_000, includeSubDomains: true } : false,
   });
 
   await app.register(cookie, {
@@ -75,9 +78,14 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
     // In-memory store is per-instance. Swap for the Redis store once you run
     // more than one machine and the limit needs to be global (see specs F-011).
     keyGenerator: (request) => request.user?.id ?? request.ip,
-    errorResponseBuilder: (request, context) => ({
-      error: { code: 'rate_limited', message: `Too many requests. Retry in ${context.after}.` },
-      requestId: request.id,
+    // @fastify/rate-limit throws whatever this returns and relies on the
+    // global error handler to read statusCode/code/message off it — see
+    // registerErrorHandler in ./plugins/errors.js. A plain `{ error, requestId }`
+    // body has none of those, so it silently became a 500.
+    errorResponseBuilder: (_request, context) => ({
+      statusCode: context.statusCode,
+      code: 'rate_limited',
+      message: `Too many requests. Retry in ${context.after}.`,
     }),
   });
 
@@ -114,7 +122,9 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
     });
   }
 
-  app.addHook('preHandler', createSessionLoader(db));
+  // Runs at onRequest, before body schema validation, so an unauthenticated
+  // request is rejected before it reveals anything about the expected shape.
+  app.addHook('onRequest', createSessionLoader(db));
 
   registerHealthRoutes(app, db);
   registerAuthRoutes(app, db, config);

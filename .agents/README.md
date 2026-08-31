@@ -35,12 +35,12 @@ one is path-based rather than judgement-based on purpose.
 
 ## Files
 
-| Role | Description | Executable form (Claude Code) |
-| --- | --- | --- |
-| Planner | Picks the next feature, writes the design | `.claude/agents/planner.md` |
-| Implementer | Writes code and tests on a branch | `.claude/agents/implementer.md` |
-| Reviewer | Reviews the diff against the spec, fresh context | `.claude/agents/reviewer.md` |
-| Fixer | Reads `ci-failures.json`, patches, retries | `.claude/agents/fixer.md` |
+| Role        | Description                                      | Executable form (Claude Code)   |
+| ----------- | ------------------------------------------------ | ------------------------------- |
+| Planner     | Picks the next feature, writes the design        | `.claude/agents/planner.md`     |
+| Implementer | Writes code and tests on a branch                | `.claude/agents/implementer.md` |
+| Reviewer    | Reviews the diff against the spec, fresh context | `.claude/agents/reviewer.md`    |
+| Fixer       | Reads `ci-failures.json`, patches, retries       | `.claude/agents/fixer.md`       |
 
 The files in this directory describe the roles. The ones under `.claude/agents/`
 are the runnable versions — Claude Code subagents, each with its own context

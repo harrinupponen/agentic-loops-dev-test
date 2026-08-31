@@ -26,7 +26,7 @@
 ### API changes
 
 | Method | Path | Auth | Notes |
-| --- | --- | --- | --- |
+| ------ | ---- | ---- | ----- |
 
 ### Data model changes
 
@@ -48,12 +48,12 @@
 
 ## Test plan
 
-| Layer | Cases |
-| --- | --- |
-| unit |  |
+| Layer       | Cases                                                                     |
+| ----------- | ------------------------------------------------------------------------- |
+| unit        |                                                                           |
 | integration | happy path · validation failure · unauthenticated · other user's resource |
-| e2e |  |
-| load | thresholds if this touches a hot path |
+| e2e         |                                                                           |
+| load        | thresholds if this touches a hot path                                     |
 
 ## Security considerations
 

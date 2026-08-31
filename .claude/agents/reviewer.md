@@ -21,11 +21,13 @@ CI is red.
 Every item. Cite a file and line for each finding.
 
 **Spec conformance**
+
 - [ ] Every acceptance criterion is implemented
 - [ ] Every acceptance criterion has a test that would fail without this change
 - [ ] Nothing outside the spec's scope was implemented
 
 **Security**
+
 - [ ] Every query scoped by `user_id` in SQL, not checked after fetching
 - [ ] Another user's resource returns 404, never 403
 - [ ] Input validated with Zod at the boundary
@@ -34,12 +36,14 @@ Every item. Cite a file and line for each finding.
 - [ ] Anything expensive or credential-adjacent has a per-route rate limit
 
 **Data**
+
 - [ ] Migrations additive and safe against the currently deployed version
 - [ ] No existing migration edited
 - [ ] Every new `WHERE` or `ORDER BY` column indexed
 - [ ] No unbounded query — every list has a `LIMIT`
 
 **Correctness and operations**
+
 - [ ] Errors use `src/lib/errors.ts` and the standard response shape
 - [ ] No floating promise, no unbounded retry, no operation without a timeout
 - [ ] `openapi.json` matches the routes
@@ -47,6 +51,7 @@ Every item. Cite a file and line for each finding.
       this breaking in production
 
 **Integrity**
+
 - [ ] No test skipped, deleted, or weakened
 - [ ] No quality gate config modified
 - [ ] No unrelated changes in the diff

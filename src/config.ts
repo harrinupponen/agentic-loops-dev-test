@@ -18,6 +18,9 @@ export const EnvSchema = z.object({
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
   RATE_LIMIT_WINDOW: z.string().default('1 minute'),
+  // Deliberately tighter than RATE_LIMIT_MAX and configured separately: auth
+  // endpoints are the cheapest place to mount a credential-stuffing attack.
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   TRUST_PROXY: boolish.default(false),
   /** Comma-separated origin allowlist used for the CSRF origin check. Empty = check disabled. */
   ALLOWED_ORIGINS: z.string().default(''),

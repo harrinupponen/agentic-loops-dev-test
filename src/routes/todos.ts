@@ -34,7 +34,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
   r.get(
     '/api/todos',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: {
         tags: ['todos'],
         querystring: ListQuery,
@@ -67,7 +67,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
   r.post(
     '/api/todos',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: {
         tags: ['todos'],
         body: z.object({ title: z.string().trim().min(1).max(500) }),
@@ -86,7 +86,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
   r.get(
     '/api/todos/:id',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: { tags: ['todos'], params: IdParam, response: { 200: TodoView } },
     },
     async (request) => {
@@ -104,7 +104,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
   r.patch(
     '/api/todos/:id',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: {
         tags: ['todos'],
         params: IdParam,
@@ -133,7 +133,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
   r.delete(
     '/api/todos/:id',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: { tags: ['todos'], params: IdParam, response: { 204: z.null() } },
     },
     async (request, reply) => {
@@ -142,7 +142,7 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
         .where(and(eq(todos.id, request.params.id), eq(todos.userId, request.user!.id)))
         .returning({ id: todos.id });
       if (!deleted[0]) throw notFound('Todo not found');
-      return reply.status(204).send();
+      return reply.status(204).send(null);
     },
   );
 }

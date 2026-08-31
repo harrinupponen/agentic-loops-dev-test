@@ -7,14 +7,14 @@ imported below — read it before your first edit.
 
 ## Where to look
 
-| You need | Read |
-| --- | --- |
-| What to build next | `specs/features.yaml`, then the linked spec |
-| How the loop works | `.agents/README.md` |
-| Getting the repo green the first time | `docs/GETTING-STARTED.md` |
-| Where the project is heading | `docs/ROADMAP.md` |
-| Why something is the way it is | `docs/adr/` |
-| How deploys work | `docs/deployment-sevalla.md` |
+| You need                              | Read                                        |
+| ------------------------------------- | ------------------------------------------- |
+| What to build next                    | `specs/features.yaml`, then the linked spec |
+| How the loop works                    | `.agents/README.md`                         |
+| Getting the repo green the first time | `docs/GETTING-STARTED.md`                   |
+| Where the project is heading          | `docs/ROADMAP.md`                           |
+| Why something is the way it is        | `docs/adr/`                                 |
+| How deploys work                      | `docs/deployment-sevalla.md`                |
 
 ## Working style in this repo
 

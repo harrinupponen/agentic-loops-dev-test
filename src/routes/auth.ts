@@ -23,12 +23,15 @@ const Credentials = z.object({
 
 const UserView = z.object({ id: z.string().uuid(), email: z.string().email() });
 
-// Auth endpoints are the cheapest place to mount a credential-stuffing attack,
-// so they get a far tighter budget than the global limit.
-const authRateLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
-
 export function registerAuthRoutes(app: FastifyInstance, db: Database, config: Config) {
   const r = app.withTypeProvider<ZodTypeProvider>();
+
+  // Auth endpoints are the cheapest place to mount a credential-stuffing
+  // attack, so they get a far tighter, separately configurable budget than
+  // the global limit.
+  const authRateLimit = {
+    rateLimit: { max: config.AUTH_RATE_LIMIT_MAX, timeWindow: '1 minute' },
+  };
 
   r.post(
     '/api/auth/register',
@@ -97,17 +100,17 @@ export function registerAuthRoutes(app: FastifyInstance, db: Database, config: C
         if (unsigned.valid && unsigned.value) await destroySession(db, unsigned.value);
       }
       clearSessionCookie(reply, config);
-      return reply.status(204).send();
+      return reply.status(204).send(null);
     },
   );
 
   r.get(
     '/api/auth/me',
     {
-      preHandler: requireAuth,
+      preValidation: requireAuth,
       schema: { tags: ['auth'], response: { 200: UserView } },
     },
-    async (request) => request.user!,
+    (request) => request.user!,
   );
 }
 

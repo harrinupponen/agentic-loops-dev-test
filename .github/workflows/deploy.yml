@@ -155,6 +155,7 @@ jobs:
     needs: [production]
     permissions:
       contents: write
+      pull-requests: write
     services:
       postgres:
         image: postgres:17-alpine
@@ -169,6 +170,7 @@ jobs:
     env:
       DATABASE_URL: postgres://app:app@localhost:5432/app_test
       COOKIE_SECRET: ci-cookie-secret-that-is-long-enough-xx
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -180,12 +182,24 @@ jobs:
           --reporter=default --reporter=json
           --outputFile.json=.ci/reports/vitest-all.json
       - run: npm run ci:baseline
-      - name: Commit if changed
+
+      # main requires a PR + a passing "CI passed" check, so this can't push
+      # directly (that includes this workflow's own bot commits — branch
+      # protection has no bot exception). No [skip ci] either: the check has
+      # to actually run for the PR to become mergeable. Auto-merge means no
+      # human has to click anything for a baseline-only diff.
+      - name: Open PR and enable auto-merge if the baseline changed
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if ! git diff --quiet .ci/test-baseline.json; then
+            BRANCH="chore/test-baseline-${{ github.run_id }}"
+            git checkout -b "$BRANCH"
             git add .ci/test-baseline.json
-            git commit -m "chore: update test baseline [skip ci]"
-            git push
+            git commit -m "chore: update test baseline"
+            git push origin "$BRANCH"
+            gh pr create --title "chore: update test baseline" \
+              --body "Automated baseline update after a successful deploy (run ${{ github.run_id }})." \
+              --base main --head "$BRANCH"
+            gh pr merge "$BRANCH" --merge --auto
           fi

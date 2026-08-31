@@ -13,11 +13,10 @@ concurrency:
 permissions:
   contents: read
 
-# NOTE: sevalla-hosting/sevalla-deploy is pinned to a tag below. Before relying
-# on this pipeline, replace each tag with the commit SHA it points at:
-#   gh api repos/sevalla-hosting/sevalla-deploy/git/ref/tags/v2.0.0 --jq .object.sha
-# A tag is mutable; a third-party action running with repository secrets should
-# not be.
+# sevalla-hosting/sevalla-deploy is pinned below to the commit SHA that
+# v2.0.0 points at (verified via `gh api .../git/ref/tags/v2.0.0` then
+# dereferencing the annotated tag object). A tag is mutable; a third-party
+# action running with repository secrets should not be.
 
 jobs:
   # Sevalla builds the real image from the Dockerfile itself. We build the same
@@ -64,7 +63,7 @@ jobs:
       # so there is no separate migrate step here. A failed migration means the
       # container never becomes ready and Sevalla keeps the old revision.
       - name: Deploy to Sevalla (staging)
-        uses: sevalla-hosting/sevalla-deploy@v2.0.0
+        uses: sevalla-hosting/sevalla-deploy@9ac54237e055eb9113a93ae84a6722a8a89b774a # v2.0.0
         with:
           action: deploy-app
           sevalla-token: ${{ secrets.SEVALLA_TOKEN }}
@@ -110,7 +109,7 @@ jobs:
       # Promote reuses the artifact that just passed the staging smoke tests
       # instead of rebuilding, so what ships is what was verified.
       - name: Promote staging to production
-        uses: sevalla-hosting/sevalla-deploy@v2.0.0
+        uses: sevalla-hosting/sevalla-deploy@9ac54237e055eb9113a93ae84a6722a8a89b774a # v2.0.0
         with:
           action: promote-app
           sevalla-token: ${{ secrets.SEVALLA_TOKEN }}

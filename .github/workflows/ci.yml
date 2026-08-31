@@ -49,7 +49,7 @@ jobs:
 
       - name: Unit tests
         run: >-
-          npx vitest run --project unit --coverage
+          npx vitest run --project unit
           --reporter=default --reporter=json
           --outputFile.json=.ci/reports/vitest-unit.json
 
@@ -94,6 +94,14 @@ jobs:
           npx vitest run --project integration
           --reporter=default --reporter=json
           --outputFile.json=.ci/reports/vitest-integration.json
+
+      - name: Coverage (unit + integration combined)
+        # vitest.config.ts's thresholds are written against the whole app, but
+        # unit tests alone only ever exercise pure logic (see AGENTS.md — most
+        # coverage value comes from integration tests). Only Tier 1 has
+        # Postgres, so the combined-workspace run that can fairly measure
+        # those thresholds has to happen here, not in Tier 0.
+        run: npx vitest run --coverage
 
       - name: OpenAPI contract is up to date
         run: npm run openapi:check

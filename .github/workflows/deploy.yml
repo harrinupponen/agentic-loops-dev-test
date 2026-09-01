@@ -99,7 +99,11 @@ jobs:
       - name: Record current deployment
         id: current
         env:
-          SEVALLA_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
+          # @sevalla/cli reads SEVALLA_API_TOKEN specifically — not the same
+          # name as the `sevalla-token` input the sevalla-deploy Action takes
+          # below. Confirmed by grepping the installed CLI's own source
+          # (dist/index.js) after this silently 401'd with the wrong name.
+          SEVALLA_API_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
         run: |
           ID=$(sevalla apps deployments list --app-id "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" --json \
             | jq -r '[.data[] | select(.status == "success")][0].id')
@@ -152,7 +156,7 @@ jobs:
       - name: Roll back on failed verification
         if: failure() && steps.verify.conclusion == 'failure'
         env:
-          SEVALLA_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
+          SEVALLA_API_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
         run: |
           echo "::error::Verification failed — rolling back to ${{ steps.current.outputs.deployment-id }}"
           sevalla apps deployments rollback "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" \

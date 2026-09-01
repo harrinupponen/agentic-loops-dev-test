@@ -53,7 +53,7 @@ features:
   - id: F-007
     title: Idempotency keys for unsafe requests
     spec: specs/features/F-007-idempotency.md
-    status: todo
+    status: spec
     deps: [F-003]
     risk_tags: [reliability]
 

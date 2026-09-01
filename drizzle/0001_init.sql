@@ -33,3 +33,4 @@ CREATE TABLE IF NOT EXISTS todos (
 
 -- Matches the keyset pagination query in routes/todos.ts.
 CREATE INDEX IF NOT EXISTS todos_user_id_created_at_idx ON todos (user_id, created_at DESC);
+-- tampering

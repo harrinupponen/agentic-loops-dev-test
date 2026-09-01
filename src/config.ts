@@ -15,6 +15,9 @@ export const EnvSchema = z.object({
   COOKIE_SECRET: z.string().min(32, 'COOKIE_SECRET must be at least 32 characters'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).default(168),
 
+  /** How long a stored idempotency outcome stays replayable. */
+  IDEMPOTENCY_TTL_HOURS: z.coerce.number().int().min(1).default(24),
+
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
   RATE_LIMIT_WINDOW: z.string().default('1 minute'),

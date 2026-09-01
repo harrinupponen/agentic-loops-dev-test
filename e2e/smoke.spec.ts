@@ -49,6 +49,27 @@ test('a user can register, manage todos, and log out', async ({ request }) => {
   expect(afterLogout.status()).toBe(401);
 });
 
+test('a retried create with the same idempotency key makes one todo', async ({ request }) => {
+  const email = uniqueEmail();
+  const register = await request.post('/api/auth/register', { data: { email, password } });
+  expect(register.status()).toBe(201);
+
+  // The network-retry journey: the client never saw the first response.
+  const headers = { 'idempotency-key': `e2e-${Date.now()}-${Math.random().toString(36).slice(2)}` };
+  const data = { title: 'survive a dropped response' };
+
+  const first = await request.post('/api/todos', { data, headers });
+  expect(first.status()).toBe(201);
+  const retry = await request.post('/api/todos', { data, headers });
+  expect(retry.status()).toBe(201);
+  expect(retry.headers()['idempotency-replayed']).toBe('true');
+  expect(await retry.text()).toBe(await first.text());
+
+  const list = await request.get('/api/todos');
+  const listBody = (await list.json()) as { items: Todo[] };
+  expect(listBody.items).toHaveLength(1);
+});
+
 test('unauthenticated access is refused', async ({ request }) => {
   const res = await request.get('/api/todos');
   expect(res.status()).toBe(401);

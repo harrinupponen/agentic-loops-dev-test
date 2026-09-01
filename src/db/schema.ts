@@ -1,5 +1,15 @@
 import { relations } from 'drizzle-orm';
-import { boolean, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import {
+  boolean,
+  index,
+  integer,
+  jsonb,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  uuid,
+} from 'drizzle-orm/pg-core';
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -41,6 +51,25 @@ export const todos = pgTable(
   (t) => [index('todos_user_id_created_at_idx').on(t.userId, t.createdAt)],
 );
 
+// One row per (user, Idempotency-Key). No secondary index: the composite
+// primary key serves both the claim/lookup and the retention sweep.
+export const idempotencyKeys = pgTable(
+  'idempotency_keys',
+  {
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    fingerprint: text('fingerprint').notNull(),
+    status: text('status', { enum: ['in_progress', 'completed'] }).notNull(),
+    responseStatus: integer('response_status'),
+    responseBody: jsonb('response_body'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.key] })],
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   todos: many(todos),
@@ -54,4 +83,12 @@ export const todosRelations = relations(todos, ({ one }) => ({
   user: one(users, { fields: [todos.userId], references: [users.id] }),
 }));
 
-export const schema = { users, sessions, todos, usersRelations, sessionsRelations, todosRelations };
+export const schema = {
+  users,
+  sessions,
+  todos,
+  idempotencyKeys,
+  usersRelations,
+  sessionsRelations,
+  todosRelations,
+};

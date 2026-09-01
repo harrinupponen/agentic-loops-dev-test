@@ -13,6 +13,16 @@ export function registerMetrics(app: FastifyInstance) {
     registers: [registry],
   });
 
+  // A steadily non-zero `replayed` proves retries are being caught; a rising
+  // `conflict` means clients reuse keys incorrectly; any `takeover` at all
+  // means requests are dying mid-flight.
+  const idempotencyRequests = new client.Counter({
+    name: 'idempotency_requests_total',
+    help: 'Keyed requests by idempotency outcome',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -28,5 +38,7 @@ export function registerMetrics(app: FastifyInstance) {
     return registry.metrics();
   });
 
-  return registry;
+  return { registry, idempotencyRequests };
 }
+
+export type Metrics = ReturnType<typeof registerMetrics>;

@@ -38,7 +38,9 @@ export async function createTestContext(overrides: Record<string, string> = {}) 
 
 /** Cascading truncate keeps tests independent without paying for a fresh schema. */
 export async function resetDb(db: Database) {
-  await db.execute(sql`TRUNCATE TABLE todos, sessions, users RESTART IDENTITY CASCADE`);
+  await db.execute(
+    sql`TRUNCATE TABLE idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
+  );
 }
 
 /** Registers a user and returns the cookie header for authenticated requests. */

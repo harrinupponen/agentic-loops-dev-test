@@ -1,10 +1,11 @@
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, preHandlerAsyncHookHandler } from 'fastify';
 import type { ZodTypeProvider } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import type { Database } from '../db/client.js';
 import { todos } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
+import { IdempotencyKeySchema } from '../lib/idempotency.js';
 import { requireAuth } from '../plugins/auth.js';
 
 const TodoView = z.object({
@@ -17,6 +18,19 @@ const TodoView = z.object({
 
 const IdParam = z.object({ id: z.string().uuid() });
 
+// Optional: a request without the header behaves exactly as it did before.
+// passthrough() so validating this one header does not strip the others.
+const IdempotencyHeaders = z
+  .object({ 'idempotency-key': IdempotencyKeySchema.optional() })
+  .passthrough();
+
+// The 409s below are raised as AppErrors, so this must match the global error
+// body exactly — a mismatch makes the serializer turn the response into a 500.
+const ErrorResponse = z.object({
+  error: z.object({ code: z.string(), message: z.string() }),
+  requestId: z.string(),
+});
+
 // Keyset pagination: stays O(limit) no matter how deep the user scrolls.
 // OFFSET would degrade linearly and is the first thing to break under load.
 const ListQuery = z.object({
@@ -28,7 +42,11 @@ const ListQuery = z.object({
     .transform((v) => (v === undefined ? undefined : v === 'true')),
 });
 
-export function registerTodoRoutes(app: FastifyInstance, db: Database) {
+export function registerTodoRoutes(
+  app: FastifyInstance,
+  db: Database,
+  idempotency: preHandlerAsyncHookHandler,
+) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
   r.get(
@@ -68,10 +86,13 @@ export function registerTodoRoutes(app: FastifyInstance, db: Database) {
     '/api/todos',
     {
       preValidation: requireAuth,
+      // preHandler, so the body is already parsed when the fingerprint is taken.
+      preHandler: idempotency,
       schema: {
         tags: ['todos'],
+        headers: IdempotencyHeaders,
         body: z.object({ title: z.string().trim().min(1).max(500) }),
-        response: { 201: TodoView },
+        response: { 201: TodoView, 409: ErrorResponse },
       },
     },
     async (request, reply) => {

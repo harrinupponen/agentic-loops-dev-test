@@ -53,7 +53,7 @@ features:
   - id: F-007
     title: Idempotency keys for unsafe requests
     spec: specs/features/F-007-idempotency.md
-    status: spec
+    status: in-progress
     deps: [F-003]
     risk_tags: [reliability]
 
@@ -112,3 +112,15 @@ features:
     status: todo
     deps: [F-014]
     risk_tags: [pii, security, legal]
+
+  # Filed while implementing F-007 (see its Design section): the CI guard
+  # demands CREATE INDEX CONCURRENTLY, but src/db/migrate.ts wraps every
+  # migration in BEGIN/COMMIT and Postgres refuses CONCURRENTLY inside a
+  # transaction. Any migration adding an index passes CI and fails at deploy.
+  # F-007 needs no index, so it does not resolve the conflict.
+  - id: F-016
+    title: Reconcile CREATE INDEX CONCURRENTLY with the transactional migration runner
+    spec: specs/features/F-016-concurrent-index-migrations.md
+    status: todo
+    deps: []
+    risk_tags: [infra, migration]

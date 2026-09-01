@@ -23,6 +23,9 @@ export const options = {
     http_req_failed: ['rate<0.01'],
     'http_req_duration{endpoint:list}': ['p(95)<200'],
     'http_req_duration{endpoint:create}': ['p(95)<300'],
+    // Same budget as the unkeyed create: a keyed create pays two extra
+    // statements. If this threshold fails first, the sweep is the suspect.
+    'http_req_duration{endpoint:create_idem}': ['p(95)<300'],
     'http_req_duration{endpoint:health}': ['p(95)<50'],
     checks: ['rate>0.99'],
   },
@@ -51,6 +54,18 @@ export default function () {
     { headers: { 'Content-Type': 'application/json' }, jar, tags: { endpoint: 'create' } },
   );
   check(create, { created: (r) => r.status === 201 });
+
+  // Fresh key per iteration: measures the claim + finalise cost, not a replay.
+  const keyed = http.post(
+    `${BASE}/api/todos`,
+    JSON.stringify({ title: `load idem ${randomString(8)}` }),
+    {
+      headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomString(24) },
+      jar,
+      tags: { endpoint: 'create_idem' },
+    },
+  );
+  check(keyed, { 'created with key': (r) => r.status === 201 });
 
   const list = http.get(`${BASE}/api/todos?limit=20`, { jar, tags: { endpoint: 'list' } });
   check(list, { listed: (r) => r.status === 200 });

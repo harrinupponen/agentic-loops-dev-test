@@ -17,6 +17,7 @@ const config: Config = {
   DATABASE_POOL_MAX: 1,
   COOKIE_SECRET: 'x'.repeat(32),
   SESSION_TTL_HOURS: 168,
+  IDEMPOTENCY_TTL_HOURS: 24,
   LOG_LEVEL: 'fatal',
   RATE_LIMIT_MAX: 100,
   RATE_LIMIT_WINDOW: '1 minute',

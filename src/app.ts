@@ -15,6 +15,7 @@ import type { Database } from './db/client.js';
 import { forbidden } from './lib/errors.js';
 import { createSessionLoader } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/errors.js';
+import { registerIdempotency } from './plugins/idempotency.js';
 import { registerMetrics } from './plugins/metrics.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -106,7 +107,7 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
   });
 
   registerErrorHandler(app);
-  registerMetrics(app);
+  const metrics = registerMetrics(app);
 
   const origins = allowedOrigins(config);
   if (origins.length > 0) {
@@ -126,9 +127,11 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
   // request is rejected before it reveals anything about the expected shape.
   app.addHook('onRequest', createSessionLoader(db));
 
+  const idempotency = registerIdempotency(app, db, config, metrics.idempotencyRequests);
+
   registerHealthRoutes(app, db);
   registerAuthRoutes(app, db, config);
-  registerTodoRoutes(app, db);
+  registerTodoRoutes(app, db, idempotency);
 
   await app.ready();
   return app;

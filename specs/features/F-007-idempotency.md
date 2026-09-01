@@ -218,7 +218,7 @@ grows without limit).
 - [ ] `POST /api/todos` with **no** header behaves exactly as before and writes no
       `idempotency_keys` row — `integration: no key means no record`
 - [ ] A key of 15 chars, 256 chars, or containing `/` returns `400
-    validation_failed` and creates no todo — `integration: rejects a malformed key`
+  validation_failed` and creates no todo — `integration: rejects a malformed key`
 - [ ] An unauthenticated `POST` carrying a key returns `401` and writes no record —
       `integration: unauthenticated request with a key`
 - [ ] A request that fails with `400` releases the key: an immediately following

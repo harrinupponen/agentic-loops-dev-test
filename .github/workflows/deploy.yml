@@ -101,8 +101,17 @@ jobs:
         env:
           SEVALLA_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
         run: |
-          ID=$(sevalla apps deployments list --app-id "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" --output json \
+          ID=$(sevalla apps deployments list --app-id "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" --json \
             | jq -r '[.data[] | select(.status == "success")][0].id')
+          # This ID is the rollback safety net's only target. A silently empty
+          # capture here (e.g. from a CLI flag rename, as happened once
+          # already) means "Roll back on failed verification" has nothing to
+          # roll back to and fails at the worst possible moment. Fail loud now
+          # instead.
+          if [ -z "$ID" ] || [ "$ID" = "null" ]; then
+            echo "::error::Could not determine the current successful deployment id — rollback would have no target."
+            exit 1
+          fi
           echo "Currently deployed: $ID"
           echo "deployment-id=$ID" >> "$GITHUB_OUTPUT"
 

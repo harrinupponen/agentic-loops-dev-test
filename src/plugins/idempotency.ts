@@ -12,6 +12,13 @@ import { IDEMPOTENCY_HEADER, requestFingerprint } from '../lib/idempotency.js';
  */
 const LEASE_SECONDS = 60;
 
+/**
+ * Rows the opportunistic retention sweep may delete in one request. Keeps the
+ * inline `DELETE` short for a user with a large expired backlog; the remainder
+ * is picked up by that user's next keyed request.
+ */
+const SWEEP_BATCH = 100;
+
 type ExistingRecord = {
   fingerprint: string;
   status: string;
@@ -127,9 +134,21 @@ export function registerIdempotency(
     }
 
     // Opportunistic retention sweep, over this user's rows only (primary key
-    // leading column). No background reaper to own and monitor.
-    await db.execute(sql`
-      DELETE FROM idempotency_keys WHERE user_id = ${userId} AND expires_at < now()`);
+    // leading column). No background reaper to own and monitor. Bounded to one
+    // batch so a heavy user's backlog cannot turn one create into a long DELETE,
+    // and best-effort like the finaliser: bookkeeping never fails the request.
+    // What this batch leaves behind the next keyed request picks up.
+    try {
+      await db.execute(sql`
+        DELETE FROM idempotency_keys
+         WHERE user_id = ${userId}
+           AND key IN (SELECT key
+                         FROM idempotency_keys
+                        WHERE user_id = ${userId} AND expires_at < now()
+                        LIMIT ${SWEEP_BATCH})`);
+    } catch (err) {
+      request.log.warn({ err, idempotency: { outcome: 'sweep_failed' } }, 'idempotency');
+    }
 
     request.idempotency = { userId, key };
   };

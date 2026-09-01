@@ -278,6 +278,64 @@ describe('idempotency keys on POST /api/todos', () => {
     expect((await records(bob.user.id)).map((r) => r.key)).toEqual(['expired-key-000000001']);
   });
 
+  it('sweeps at most a bounded batch per request', async () => {
+    const alice = await registerUser(ctx.app, 'alice@example.com');
+    const fingerprint = requestFingerprint('POST', '/api/todos', { title: 'old' });
+
+    // 105 expired rows: one bounded sweep must leave exactly the overflow
+    // behind rather than deleting an unbounded number inline.
+    await ctx.db.execute(sql`
+      INSERT INTO idempotency_keys
+        (user_id, key, fingerprint, status, response_status, response_body, created_at, expires_at)
+      SELECT ${alice.user.id}, 'expired-key-' || lpad(i::text, 9, '0'), ${fingerprint},
+             'completed', 201, ${JSON.stringify({ id: 'x' })}::jsonb,
+             now() - make_interval(secs => 90000), now() - make_interval(secs => 3600)
+        FROM generate_series(1, 105) AS i`);
+
+    const res = await post(alice.cookie, 'buy milk', KEY);
+    expect(res.statusCode).toBe(201);
+
+    const remaining = await records(alice.user.id);
+    // 105 expired − 100 swept + the row this request just stored.
+    expect(remaining).toHaveLength(6);
+    expect(remaining.filter((r) => r.key === KEY)).toHaveLength(1);
+  });
+
+  it('a failing sweep does not fail the request', async () => {
+    const { cookie, user } = await registerUser(ctx.app);
+    await seed({
+      userId: user.id,
+      key: 'expired-key-000000001',
+      fingerprint: requestFingerprint('POST', '/api/todos', { title: 'old' }),
+      status: 'completed',
+      ageSeconds: 90_000,
+      expiresInSeconds: -3600,
+      responseBody: { id: '00000000-0000-0000-0000-0000000000ff' },
+    });
+
+    // Stand in for a query timeout or lock contention on the sweep: the DELETE
+    // raises, the create must still succeed.
+    await ctx.db.execute(sql`
+      CREATE FUNCTION idem_sweep_boom() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'sweep exploded'; END $$`);
+    await ctx.db.execute(sql`
+      CREATE TRIGGER idem_sweep_boom BEFORE DELETE ON idempotency_keys
+      FOR EACH ROW EXECUTE FUNCTION idem_sweep_boom()`);
+
+    try {
+      const res = await post(cookie, 'buy milk', KEY);
+      expect(res.statusCode).toBe(201);
+      expect(await listTitles(cookie)).toHaveLength(1);
+      // The key is still claimed and finalised, so a retry replays.
+      const replay = await post(cookie, 'buy milk', KEY);
+      expect(replay.headers['idempotency-replayed']).toBe('true');
+      expect(await listTitles(cookie)).toHaveLength(1);
+    } finally {
+      await ctx.db.execute(sql`DROP TRIGGER idem_sweep_boom ON idempotency_keys`);
+      await ctx.db.execute(sql`DROP FUNCTION idem_sweep_boom()`);
+    }
+  });
+
   it('exposes idempotency outcomes', async () => {
     const { cookie, user } = await registerUser(ctx.app);
 

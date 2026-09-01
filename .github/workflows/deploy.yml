@@ -106,7 +106,7 @@ jobs:
           SEVALLA_API_TOKEN: ${{ secrets.SEVALLA_TOKEN }}
         run: |
           ID=$(sevalla apps deployments list --app-id "${{ vars.SEVALLA_PRODUCTION_APP_ID }}" --json \
-            | jq -r '[.data[] | select(.status == "success")][0].id')
+            | jq -r '[.[] | select(.status == "success")][0].id')
           # This ID is the rollback safety net's only target. A silently empty
           # capture here (e.g. from a CLI flag rename, as happened once
           # already) means "Roll back on failed verification" has nothing to

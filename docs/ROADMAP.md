@@ -57,6 +57,9 @@ Write down every place you had to intervene. That list is the input to Phase 2.
 **Exit:** two or three features through this loop, and a written list of the
 recurring intervention points.
 
+See `docs/phase1-findings.md` for the list from this project's own Phase 1
+run.
+
 ---
 
 ## Phase 2 — Automate the fix loop

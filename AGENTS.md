@@ -21,6 +21,7 @@ There are no AI features in the application. AI is how it gets built, not what i
 | Database   | Postgres 17 via Drizzle ORM (query builder only)                     |
 | Migrations | Plain SQL in `drizzle/`, applied by `scripts/migrate.ts`             |
 | Auth       | Argon2id passwords, opaque session tokens in signed HttpOnly cookies |
+| Web        | `web/` TypeScript compiled to browser ESM, served from `dist/public` |
 | Tests      | Vitest (unit + integration), Playwright (e2e), k6 (load)             |
 | CI/CD      | GitHub Actions → Sevalla (Kubernetes PaaS, managed Postgres)         |
 

@@ -31,6 +31,10 @@ jobs:
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '1000000'
       DATABASE_POOL_MAX: '20'
+      # `npm run build` below now also builds the browser client, and the app
+      # refuses to boot while serving one with an empty origin allowlist
+      # (docs/adr/0007-fail-closed-security-config.md).
+      ALLOWED_ORIGINS: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

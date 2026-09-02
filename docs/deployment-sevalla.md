@@ -82,15 +82,21 @@ target.
 
 **Environment variables** on each app:
 
-| Variable            | Value                                                |
-| ------------------- | ---------------------------------------------------- |
-| `DATABASE_URL`      | internal connection string                           |
-| `COOKIE_SECRET`     | `openssl rand -base64 48`, different per environment |
-| `NODE_ENV`          | `production`                                         |
-| `TRUST_PROXY`       | `true` (requests arrive through Cloudflare)          |
-| `ALLOWED_ORIGINS`   | that environment's public URL                        |
-| `PORT`              | `3000`                                               |
-| `DATABASE_POOL_MAX` | see the note below                                   |
+| Variable            | Value                                                   |
+| ------------------- | ------------------------------------------------------- |
+| `DATABASE_URL`      | internal connection string                              |
+| `COOKIE_SECRET`     | `openssl rand -base64 48`, different per environment    |
+| `NODE_ENV`          | `production`                                            |
+| `TRUST_PROXY`       | `true` (requests arrive through Cloudflare)             |
+| `ALLOWED_ORIGINS`   | that environment's public URL — **required**, see below |
+| `PORT`              | `3000`                                                  |
+| `DATABASE_POOL_MAX` | see the note below                                      |
+
+`ALLOWED_ORIGINS` must be set **before** a revision that ships the browser client
+is deployed. An empty value disables the CSRF origin check, so the app refuses to
+start while serving the client without it: the container never becomes ready and
+Sevalla keeps the previous revision. See
+`docs/adr/0007-fail-closed-security-config.md`.
 
 **GitHub secrets:** `SEVALLA_TOKEN` (from app.sevalla.com/api-keys).
 

@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agentic-todo</title>
+    <link rel="stylesheet" href="/app/styles.css" />
+    <script type="module" src="/app/main.js"></script>
+  </head>
+  <body>
+    <main>
+      <h1>agentic-todo</h1>
+      <p id="status" role="status">Loading…</p>
+
+      <section id="signed-out" hidden>
+        <p id="signed-out-alert" class="alert" role="alert" aria-live="polite" tabindex="-1"></p>
+
+        <form id="signin-form" aria-label="Sign in" method="post" action="/api/auth/login">
+          <h2>Sign in</h2>
+          <label for="signin-email">Email</label>
+          <input
+            id="signin-email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            maxlength="254"
+            required
+          />
+          <label for="signin-password">Password</label>
+          <input
+            id="signin-password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            minlength="12"
+            maxlength="200"
+            required
+          />
+          <button type="submit">Sign in</button>
+        </form>
+
+        <form
+          id="register-form"
+          aria-label="Create account"
+          method="post"
+          action="/api/auth/register"
+          hidden
+        >
+          <h2>Create account</h2>
+          <label for="register-email">Email</label>
+          <input
+            id="register-email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            maxlength="254"
+            required
+          />
+          <label for="register-password">Password</label>
+          <input
+            id="register-password"
+            name="password"
+            type="password"
+            autocomplete="new-password"
+            minlength="12"
+            maxlength="200"
+            required
+          />
+          <p>At least 12 characters.</p>
+          <button type="submit">Create account</button>
+        </form>
+
+        <button id="toggle-panel" type="button">Create an account</button>
+      </section>
+
+      <section id="signed-in" hidden>
+        <p>Signed in as <span id="account-email"></span></p>
+        <button id="logout" type="button">Log out</button>
+        <section id="todo-panel" aria-label="Todos">
+          <p>Your todos will appear here.</p>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

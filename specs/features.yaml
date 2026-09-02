@@ -49,7 +49,7 @@ features:
   - id: F-006
     title: Web UI — app shell and auth screens
     spec: specs/features/F-006-web-ui.md
-    status: spec
+    status: in-progress
     deps: [F-003]
     risk_tags: [frontend, auth, security, infra]
 

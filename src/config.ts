@@ -25,8 +25,14 @@ export const EnvSchema = z.object({
   // endpoints are the cheapest place to mount a credential-stuffing attack.
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
   TRUST_PROXY: boolish.default(false),
-  /** Comma-separated origin allowlist used for the CSRF origin check. Empty = check disabled. */
+  /**
+   * Comma-separated origin allowlist used for the CSRF origin check. Empty =
+   * check disabled, which is why serving a browser client with an empty value
+   * is a boot failure — see src/routes/web.ts and ADR 0007.
+   */
   ALLOWED_ORIGINS: z.string().default(''),
+  /** Directory holding the built browser client (index.html plus app/). */
+  WEB_ROOT: z.string().min(1).default('dist/public'),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(10_000),
 });
 

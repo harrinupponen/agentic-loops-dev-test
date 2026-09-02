@@ -50,6 +50,11 @@ jobs:
       # the very first authenticated request after login/register 401s.
       NODE_ENV: test
       LOG_LEVEL: warn
+      # `npm run build` below now also builds the browser client, and the app
+      # refuses to boot while serving one with an empty origin allowlist
+      # (docs/adr/0007-fail-closed-security-config.md). This is the origin
+      # Playwright drives, so it is also what the CSRF check must allow.
+      ALLOWED_ORIGINS: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -129,6 +134,8 @@ jobs:
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '100000'
       AUTH_RATE_LIMIT_MAX: '100000'
+      # This job builds the client too, so the same boot rule applies here.
+      ALLOWED_ORIGINS: http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

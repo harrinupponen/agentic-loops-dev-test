@@ -20,6 +20,7 @@ import { registerMetrics } from './plugins/metrics.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerTodoRoutes } from './routes/todos.js';
+import { registerWebRoutes } from './routes/web.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -28,7 +29,16 @@ declare module 'fastify' {
   }
 }
 
-export async function buildApp(config: Config, db: Database): Promise<FastifyInstance> {
+export interface BuildOptions {
+  /** Redirects the logger somewhere a test can read; defaults to stdout. */
+  logStream?: NodeJS.WritableStream;
+}
+
+export async function buildApp(
+  config: Config,
+  db: Database,
+  options: BuildOptions = {},
+): Promise<FastifyInstance> {
   const app = Fastify({
     trustProxy: config.TRUST_PROXY,
     // Bounded body size: the default is 1 MiB, made explicit so it is reviewable.
@@ -37,6 +47,7 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
     genReqId: () => randomUUID(),
     logger: {
       level: config.LOG_LEVEL,
+      ...(options.logStream ? { stream: options.logStream } : {}),
       // Structured logs only. Never log cookies, auth headers, or request bodies.
       redact: {
         paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
@@ -60,8 +71,22 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
   app.setSerializerCompiler(serializerCompiler);
 
   await app.register(helmet, {
+    // Explicit rather than leaning on the default-src fallback: this is what
+    // makes "no inline script, no innerHTML" in the web client enforceable.
+    // No 'unsafe-inline' and no 'unsafe-eval' anywhere.
     contentSecurityPolicy: {
-      directives: { 'default-src': ["'self'"], 'frame-ancestors': ["'none'"] },
+      useDefaults: false,
+      directives: {
+        'default-src': ["'self'"],
+        'script-src': ["'self'"],
+        'style-src': ["'self'"],
+        'img-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'base-uri': ["'none'"],
+        'form-action': ["'self'"],
+        'object-src': ["'none'"],
+        'frame-ancestors': ["'none'"],
+      },
     },
     hsts:
       config.NODE_ENV === 'production' ? { maxAge: 31_536_000, includeSubDomains: true } : false,
@@ -132,6 +157,8 @@ export async function buildApp(config: Config, db: Database): Promise<FastifyIns
   registerHealthRoutes(app, db);
   registerAuthRoutes(app, db, config);
   registerTodoRoutes(app, db, idempotency);
+  // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.
+  await registerWebRoutes(app, config);
 
   await app.ready();
   return app;

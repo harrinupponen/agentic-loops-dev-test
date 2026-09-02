@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
-import { buildApp } from '../../src/app.js';
+import { buildApp, type BuildOptions } from '../../src/app.js';
 import { loadConfig, type Config } from '../../src/config.js';
 import { createDb, type Database } from '../../src/db/client.js';
 
@@ -11,7 +11,18 @@ export interface TestContext {
   close: () => Promise<void>;
 }
 
-export async function createTestContext(overrides: Record<string, string> = {}) {
+/**
+ * A path with no client in it. CI runs the integration suite before any build,
+ * but a developer who runs it after one would otherwise trip the boot rule in
+ * src/routes/web.ts and see every test fail for an unrelated reason. Web tests
+ * opt in to serving by overriding WEB_ROOT with the fixture client.
+ */
+export const NO_WEB_CLIENT = 'tests/fixtures/no-web-client';
+
+export async function createTestContext(
+  overrides: Record<string, string> = {},
+  options: BuildOptions = {},
+) {
   const config = loadConfig({
     ...process.env,
     NODE_ENV: 'test',
@@ -19,11 +30,20 @@ export async function createTestContext(overrides: Record<string, string> = {}) 
     COOKIE_SECRET: 'test-cookie-secret-that-is-long-enough-x',
     RATE_LIMIT_MAX: '10000',
     SHUTDOWN_GRACE_MS: '0',
+    ALLOWED_ORIGINS: '',
+    WEB_ROOT: NO_WEB_CLIENT,
     ...overrides,
   });
 
   const { pool, db } = createDb(config.DATABASE_URL, 5);
-  const app = await buildApp(config, db);
+  let app: FastifyInstance;
+  try {
+    app = await buildApp(config, db, options);
+  } catch (error) {
+    // buildApp can refuse to start; do not leak the pool when it does.
+    await pool.end();
+    throw error;
+  }
 
   return {
     app,

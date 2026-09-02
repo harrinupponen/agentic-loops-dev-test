@@ -13,6 +13,7 @@ db-down:
 
 dev: db-up
 	npm run db:migrate
+	npm run build:web
 	npm run dev
 
 migrate:

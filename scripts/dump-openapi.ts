@@ -24,6 +24,10 @@ const config: Config = {
   AUTH_RATE_LIMIT_MAX: 10,
   TRUST_PROXY: false,
   ALLOWED_ORIGINS: '',
+  // Deliberately a path with no client: the web routes are hidden from the
+  // contract anyway, and this keeps the dump from tripping the boot rule in
+  // src/routes/web.ts on a machine that has just run `npm run build`.
+  WEB_ROOT: 'dist/no-web-client',
   SHUTDOWN_GRACE_MS: 0,
 };
 

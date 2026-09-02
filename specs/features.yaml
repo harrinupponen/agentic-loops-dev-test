@@ -43,12 +43,15 @@ features:
     deps: [F-004]
     risk_tags: [auth, pii, email]
 
+  # Split during planning: "auth screens and todo list" was ~900-1000 lines
+  # across three test layers. F-006 is the shell, static serving, and auth
+  # screens; the list screen is F-016 at the bottom of this file.
   - id: F-006
-    title: Web UI — auth screens and todo list
+    title: Web UI — app shell and auth screens
     spec: specs/features/F-006-web-ui.md
-    status: todo
+    status: spec
     deps: [F-003]
-    risk_tags: [frontend]
+    risk_tags: [frontend, auth, security, infra]
 
   - id: F-007
     title: Idempotency keys for unsafe requests
@@ -112,3 +115,12 @@ features:
     status: todo
     deps: [F-014]
     risk_tags: [pii, security, legal]
+
+  # Split out of F-006 (see the comment on it). Plan this one only after F-006
+  # has been reviewed, so it inherits whatever the human changed about the shell.
+  - id: F-016
+    title: Web UI — todo list screen
+    spec: specs/features/F-016-web-todo-list.md
+    status: todo
+    deps: [F-006]
+    risk_tags: [frontend]

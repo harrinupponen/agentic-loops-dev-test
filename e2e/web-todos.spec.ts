@@ -23,46 +23,7 @@ function gate(): { held: Promise<void>; release: () => void } {
 const errorBody = (code: string, message: string) =>
   JSON.stringify({ error: { code, message }, requestId: 'req-e2e' });
 
-const json = (body: unknown) => ({
-  status: 200,
-  contentType: 'application/json',
-  body: JSON.stringify(body),
-});
-
-const TS = '2026-09-03T10:00:00.000Z';
-const stubbed = (id: string, title: string, completed = false) => ({
-  id,
-  title,
-  completed,
-  createdAt: TS,
-  updatedAt: TS,
-});
-
-/**
- * Mounts the panel with a canned session and a canned first page, so a spec
- * about what the client does with a *response* does not have to register an
- * account to get one. The page, the client and the browser are still real; only
- * the two bootstrap calls are answered from here. It also keeps the file inside
- * the API's 10-requests-a-minute auth rate limit, which a real registration in
- * every spec would spend on setup rather than on coverage.
- */
-async function mountWithStubbedSession(page: Page, todos: ReturnType<typeof stubbed>[]) {
-  await page.route(
-    (url) => url.pathname === '/api/auth/me',
-    (route) =>
-      route.fulfill(
-        json({ id: '00000000-0000-4000-8000-000000000001', email: 'stub@example.com' }),
-      ),
-  );
-  await page.route(
-    (url) => url.pathname === '/api/todos',
-    (route) => route.fulfill(json({ items: todos, nextCursor: null })),
-  );
-  await page.goto('/');
-  await expect(rows(page)).toHaveCount(todos.length);
-}
-
-/** Answers every PATCH with `status`; a DELETE succeeds. */
+/** Answers every PATCH with `status`; lets everything else through untouched. */
 async function failEveryPatch(page: Page, status: number, code: string, message: string) {
   await page.route(
     (url) => url.pathname.startsWith('/api/todos/'),
@@ -73,7 +34,7 @@ async function failEveryPatch(page: Page, status: number, code: string, message:
             contentType: 'application/json',
             body: errorBody(code, message),
           })
-        : route.fulfill({ status: 204, body: '' }),
+        : route.continue(),
   );
 }
 
@@ -239,7 +200,9 @@ test('a list response in flight at log out never reaches the next account', asyn
 });
 
 test('a failed toggle leaves the checkbox showing the server value', async ({ page }) => {
-  await mountWithStubbedSession(page, [stubbed('t-1', 'unhappy toggle')]);
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'unhappy toggle');
 
   await failEveryPatch(page, 500, 'internal_error', 'Boom');
 
@@ -252,10 +215,10 @@ test('a failed toggle leaves the checkbox showing the server value', async ({ pa
 });
 
 test('a toggle answered with 404 drops the row and shows no error', async ({ page }) => {
-  await mountWithStubbedSession(page, [
-    stubbed('t-1', 'deleted elsewhere'),
-    stubbed('t-2', 'surviving row'),
-  ]);
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'deleted elsewhere');
+  await addTodo(page, 'surviving row');
 
   await failEveryPatch(page, 404, 'not_found', 'Todo not found');
 
@@ -270,19 +233,25 @@ test('a toggle answered with 404 drops the row and shows no error', async ({ pag
 test('a toggle that lands after the list re-renders updates the visible checkbox', async ({
   page,
 }) => {
-  await mountWithStubbedSession(page, [stubbed('t-1', 'slow toggle'), stubbed('t-2', 'other row')]);
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'slow toggle');
+  await addTodo(page, 'other row');
 
   const { held, release } = gate();
   await page.route(
     (url) => url.pathname.startsWith('/api/todos/'),
     async (route) => {
       if (route.request().method() !== 'PATCH') {
-        await route.fulfill({ status: 204, body: '' });
+        await route.continue();
         return;
       }
-      // Held open so the delete below re-renders the list first.
+      // The real server answers now, as this account; only the delivery of
+      // those bytes to the page is held open, so the delete below can
+      // re-render the list first.
+      const response = await route.fetch();
       await held;
-      await route.fulfill(json(stubbed('t-1', 'slow toggle', true)));
+      await route.fulfill({ response });
     },
   );
 

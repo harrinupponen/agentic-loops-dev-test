@@ -11,6 +11,33 @@ const rows = (page: Page) => page.getByRole('list', { name: 'Your todos' }).getB
 const addForm = (page: Page) => page.getByRole('form', { name: 'Add todo' });
 const loadMore = (page: Page) => page.getByRole('button', { name: 'Load more' });
 
+/** A gate a route handler can wait on, so a response lands exactly when we say. */
+function gate(): { held: Promise<void>; release: () => void } {
+  let release = (): void => undefined;
+  const held = new Promise<void>((resolve) => {
+    release = () => resolve();
+  });
+  return { held, release: () => release() };
+}
+
+const errorBody = (code: string, message: string) =>
+  JSON.stringify({ error: { code, message }, requestId: 'req-e2e' });
+
+/** Answers the next PATCH with `status`; every other call goes to the server. */
+async function failNextPatch(page: Page, status: number, code: string, message: string) {
+  await page.route(
+    (url) => url.pathname.startsWith('/api/todos/'),
+    (route) =>
+      route.request().method() === 'PATCH'
+        ? route.fulfill({
+            status,
+            contentType: 'application/json',
+            body: errorBody(code, message),
+          })
+        : route.continue(),
+  );
+}
+
 test('create, complete, delete a todo', async ({ page }) => {
   await page.goto('/');
   await createAccount(page);
@@ -107,6 +134,143 @@ test('a second account sees an empty list', async ({ page }) => {
   await expect(page.getByText('You have no todos yet.')).toBeVisible();
   await expect(page.getByText('account A private note')).toHaveCount(0);
   await expect(rows(page)).toHaveCount(0);
+});
+
+test('a list response in flight at log out never reaches the next account', async ({ page }) => {
+  const LEAKED = 'account A private note';
+
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, LEAKED);
+
+  // Hold the first account's next list response open, so it can only arrive
+  // after somebody else has signed in on this browser. Fulfilled from the test
+  // rather than the server: the point is a response that carries A's rows and
+  // lands during B's session, which is the shared-browser leak.
+  const { held, release } = gate();
+  let holdNext = true;
+  await page.route(
+    (url) => url.pathname === '/api/todos',
+    async (route) => {
+      if (!holdNext) {
+        await route.continue();
+        return;
+      }
+      holdNext = false;
+      await held;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          items: [
+            {
+              id: '11111111-1111-4111-8111-111111111111',
+              title: LEAKED,
+              completed: false,
+              createdAt: '2026-09-03T10:00:00.000Z',
+              updatedAt: '2026-09-03T10:00:00.000Z',
+            },
+          ],
+          nextCursor: null,
+        }),
+      });
+    },
+  );
+
+  // Mounts the panel and issues the list request that is now held open.
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Log out' }).click();
+  await expect(signInForm(page)).toBeVisible();
+
+  await createAccount(page);
+  await expect(page.getByText('You have no todos yet.')).toBeVisible();
+
+  const landed = page.waitForResponse((response) => response.url().includes('/api/todos'));
+  release();
+  await landed;
+  // The continuation belongs to a mount that no longer exists, so it must do
+  // nothing at all — not render, not repopulate the in-memory list.
+  await page.waitForTimeout(250);
+
+  await expect(page.getByText(LEAKED)).toHaveCount(0);
+  await expect(rows(page)).toHaveCount(0);
+  await expect(page.getByText('You have no todos yet.')).toBeVisible();
+});
+
+test('a failed toggle leaves the checkbox showing the server value', async ({ page }) => {
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'unhappy toggle');
+
+  await failNextPatch(page, 500, 'internal_error', 'Boom');
+
+  // click(), not check(): check() asserts the box stays checked, and the whole
+  // point here is that the failure puts it back.
+  await page.getByRole('checkbox', { name: 'unhappy toggle' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('Could not update that todo.');
+  await expect(page.getByRole('checkbox', { name: 'unhappy toggle' })).not.toBeChecked();
+
+  // The list GET is not intercepted — only /api/todos/:id is — so a reload
+  // reads the real state back.
+  await page.reload();
+  // Nothing was persisted either, so the reverted box is the honest one.
+  await expect(page.getByRole('checkbox', { name: 'unhappy toggle' })).not.toBeChecked();
+});
+
+test('a toggle answered with 404 drops the row and shows no error', async ({ page }) => {
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'deleted elsewhere');
+  await addTodo(page, 'surviving row');
+
+  await failNextPatch(page, 404, 'not_found', 'Todo not found');
+
+  // click(), not check(): the row is about to leave the DOM entirely.
+  await page.getByRole('checkbox', { name: 'deleted elsewhere' }).click();
+
+  // Gone in another tab: the row leaves the list, and that is not an error.
+  await expect(rows(page)).toHaveText([/surviving row/]);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('a toggle that lands after the list re-renders updates the visible checkbox', async ({
+  page,
+}) => {
+  await page.goto('/');
+  await createAccount(page);
+  await addTodo(page, 'slow toggle');
+  await addTodo(page, 'other row');
+
+  const { held, release } = gate();
+  let holdNext = true;
+  await page.route(
+    (url) => url.pathname.startsWith('/api/todos/'),
+    async (route) => {
+      if (route.request().method() === 'PATCH' && holdNext) {
+        holdNext = false;
+        await held;
+      }
+      await route.continue();
+    },
+  );
+
+  await page.getByRole('checkbox', { name: 'slow toggle' }).click();
+
+  // A delete re-renders the whole list, which discards the node the toggle
+  // started on. The confirmed value must still reach the box the user sees.
+  await page.getByRole('button', { name: 'Delete other row' }).click();
+  await expect(rows(page)).toHaveCount(1);
+
+  const landed = page.waitForResponse((response) => response.request().method() === 'PATCH');
+  release();
+  await landed;
+
+  await expect(page.getByRole('checkbox', { name: 'slow toggle' })).toBeChecked();
+  await page.reload();
+  await expect(page.getByRole('checkbox', { name: 'slow toggle' })).toBeChecked();
 });
 
 test('an expired session returns to the sign-in form', async ({ page, context }) => {

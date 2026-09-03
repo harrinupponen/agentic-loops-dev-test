@@ -109,3 +109,48 @@ export function applyCreated(items: readonly Todo[], created: Todo): Todo[] {
 export function applyRemoved(items: readonly Todo[], id: string): Todo[] {
   return items.filter((item) => item.id !== id);
 }
+
+/** What a PATCH came back with: the row the server confirmed, or why it did not. */
+export type ToggleResult = { ok: true; todo: Todo } | { ok: false; failure: ApiFailure };
+
+export interface ToggleResolution {
+  /** The list after the outcome is applied. */
+  items: Todo[];
+  /** What that row's checkbox must show now; `null` when the row is gone. */
+  checked: boolean | null;
+  /** The row left the list, so the whole list is re-rendered rather than one box. */
+  removed: boolean;
+  /** The failure to report, if any. A `404` is not one: the row is simply gone. */
+  report?: ApiFailure;
+}
+
+/**
+ * The whole "what should this row show now" decision, kept DOM-free so it is
+ * unit-testable: the box never shows a value the server has not confirmed, and a
+ * `404` means the row was deleted elsewhere and is dropped without an error.
+ */
+export function resolveToggle(
+  items: readonly Todo[],
+  id: string,
+  desired: boolean,
+  result: ToggleResult,
+): ToggleResolution {
+  if (result.ok) {
+    return {
+      items: applyUpdated(items, result.todo),
+      checked: result.todo.completed,
+      removed: false,
+    };
+  }
+  if (result.failure.status === 404) {
+    return { items: applyRemoved(items, id), checked: null, removed: true };
+  }
+  // Back to the last value the server confirmed, never the user's click.
+  const confirmed = items.find((item) => item.id === id)?.completed;
+  return {
+    items: [...items],
+    checked: confirmed ?? !desired,
+    removed: false,
+    report: result.failure,
+  };
+}

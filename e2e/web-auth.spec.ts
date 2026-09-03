@@ -1,25 +1,14 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+import { createAccount, signInForm, submitRegistration, uniqueEmail } from './helpers.js';
 
 /**
  * Browser-level proof that the session cookie F-002 issues actually works in a
  * real browser, and that the CSP does not block the app's own script.
  * Selectors are label- and role-based, so the accessibility contract in the
  * spec is under test rather than merely documented.
+ *
+ * The journey helpers live in `helpers.ts` and are shared with web-todos.spec.ts.
  */
-
-const password = 'correct-horse-battery-staple';
-const uniqueEmail = () => `web-${Date.now()}-${Math.random().toString(36).slice(2)}@example.com`;
-
-const signInForm = (page: Page) => page.getByRole('form', { name: 'Sign in' });
-const createAccountForm = (page: Page) => page.getByRole('form', { name: 'Create account' });
-
-async function createAccount(page: Page, email: string) {
-  await page.getByRole('button', { name: 'Create an account' }).click();
-  const form = createAccountForm(page);
-  await form.getByLabel('Email').fill(email);
-  await form.getByLabel('Password').fill(password);
-  await form.getByRole('button', { name: 'Create account' }).click();
-}
 
 test('register, persist across reload, log out', async ({ page }) => {
   const email = uniqueEmail();
@@ -66,7 +55,8 @@ test('duplicate registration is shown to the user', async ({ page }) => {
   await page.getByRole('button', { name: 'Log out' }).click();
   await expect(signInForm(page)).toBeVisible();
 
-  await createAccount(page, email);
+  // Submitted expecting a failure, so this one does not assert a session.
+  await submitRegistration(page, email);
   await expect(page.getByRole('alert')).toContainText('already exists');
 });
 

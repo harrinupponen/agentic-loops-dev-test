@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ApiFailure } from '../../web/src/api.js';
 import {
   applyCreated,
   applyRemoved,
@@ -8,6 +9,7 @@ import {
   deleteTodo,
   fetchTodos,
   listPath,
+  resolveToggle,
   setCompleted,
   type Todo,
 } from '../../web/src/todos.js';
@@ -183,6 +185,54 @@ describe('applyUpdated replaces the row from the response', () => {
       'b',
     ]);
     expect(applyRemoved(items, 'zzz')).toEqual(items);
+  });
+});
+
+describe('a toggle shows only what the server confirmed', () => {
+  const items = [todo('a'), todo('b', { completed: true })];
+
+  it('takes the checkbox state from the 200 body, not from the click', () => {
+    // The user clicked "a" on, and the server is the one that says so.
+    const resolution = resolveToggle(items, 'a', true, {
+      ok: true,
+      todo: todo('a', { completed: true }),
+    });
+
+    expect(resolution.checked).toBe(true);
+    expect(resolution.removed).toBe(false);
+    expect(resolution.report).toBeUndefined();
+    expect(resolution.items.map((item) => item.completed)).toEqual([true, true]);
+  });
+
+  it('reverts the checkbox to the last confirmed value when the PATCH fails', () => {
+    const failure = new ApiFailure(500, 'internal_error', 'Boom', 'req-1');
+
+    // "b" is completed on the server; the click that tried to clear it failed,
+    // so the box must go back to checked rather than showing the user's click.
+    const resolution = resolveToggle(items, 'b', false, { ok: false, failure });
+
+    expect(resolution.checked).toBe(true);
+    expect(resolution.removed).toBe(false);
+    expect(resolution.report).toBe(failure);
+    expect(resolution.items).toEqual(items);
+  });
+
+  it('falls back to the opposite of the click for a row it no longer knows', () => {
+    const failure = new ApiFailure(429, 'rate_limited', 'Too many requests.', 'req-1');
+
+    expect(resolveToggle([], 'gone', true, { ok: false, failure }).checked).toBe(false);
+  });
+
+  it('drops the row and reports nothing when the PATCH returns 404', () => {
+    const failure = new ApiFailure(404, 'not_found', 'Todo not found', 'req-1');
+
+    // Deleted in another tab: the row is gone, which is not an error to show.
+    const resolution = resolveToggle(items, 'a', true, { ok: false, failure });
+
+    expect(resolution.items.map((item) => item.id)).toEqual(['b']);
+    expect(resolution.removed).toBe(true);
+    expect(resolution.checked).toBeNull();
+    expect(resolution.report).toBeUndefined();
   });
 });
 

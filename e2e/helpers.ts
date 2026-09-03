@@ -9,12 +9,22 @@ export const uniqueEmail = () =>
 
 export const signInForm = (page: Page) => page.getByRole('form', { name: 'Sign in' });
 
-export async function createAccount(page: Page, email = uniqueEmail()): Promise<string> {
+export const createAccountForm = (page: Page) => page.getByRole('form', { name: 'Create account' });
+
+/**
+ * Fills and submits the register form without asserting the outcome, because one
+ * caller submits it expecting the duplicate-email failure.
+ */
+export async function submitRegistration(page: Page, email: string): Promise<void> {
   await page.getByRole('button', { name: 'Create an account' }).click();
-  const form = page.getByRole('form', { name: 'Create account' });
+  const form = createAccountForm(page);
   await form.getByLabel('Email').fill(email);
   await form.getByLabel('Password').fill(PASSWORD);
   await form.getByRole('button', { name: 'Create account' }).click();
+}
+
+export async function createAccount(page: Page, email = uniqueEmail()): Promise<string> {
+  await submitRegistration(page, email);
   await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible();
   return email;
 }

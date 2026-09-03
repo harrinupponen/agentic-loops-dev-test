@@ -75,16 +75,35 @@ test('duplicate registration is shown to the user', async ({ page }) => {
 // a CSP violation or an uncaught exception reads differently and still fails.
 const EXPECTED_BOOTSTRAP_401 = /Failed to load resource: the server responded with a status of 401/;
 
+// Cloudflare fronts every *.sevalla.app domain (not something this app can
+// opt out of on a Hobby-tier resource — no custom domain, no per-zone
+// control) and injects its own bot-detection script into a hidden
+// same-origin iframe on every response. Our CSP blocks it like any other
+// inline script, which is correct — it just isn't ours to fix. Counted
+// separately, not string-matched into the pass/fail set, and capped at
+// exactly the number Cloudflare's own presence (the `cf-ray` response
+// header) explains: 1 when proxied, 0 when this test runs locally/in CI
+// with no CDN in front of it. A second one, or any inline-script violation
+// with no `cf-ray` header, means something other than Cloudflare's script
+// is being blocked and must still fail.
+const CSP_INLINE_SCRIPT_BLOCKED =
+  /Executing inline script violates the following Content Security Policy directive 'script-src 'self''/;
+
 test('the page loads with no console errors', async ({ page }) => {
   const problems: string[] = [];
+  let cspInlineViolations = 0;
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
     if (EXPECTED_BOOTSTRAP_401.test(message.text())) return;
+    if (CSP_INLINE_SCRIPT_BLOCKED.test(message.text())) {
+      cspInlineViolations += 1;
+      return;
+    }
     problems.push(message.text());
   });
   page.on('pageerror', (error) => problems.push(error.message));
 
-  await page.goto('/');
+  const response = await page.goto('/');
   await expect(signInForm(page)).toBeVisible();
 
   await createAccount(page, uniqueEmail());
@@ -94,4 +113,7 @@ test('the page loads with no console errors', async ({ page }) => {
 
   // A CSP that blocks the app's own module shows up here first.
   expect(problems).toEqual([]);
+
+  const throughCloudflare = response?.headers()['cf-ray'] !== undefined;
+  expect(cspInlineViolations).toBeLessThanOrEqual(throughCloudflare ? 1 : 0);
 });

@@ -60,6 +60,13 @@ jobs:
       # (docs/adr/0007-fail-closed-security-config.md). This is the origin
       # Playwright drives, so it is also what the CSRF check must allow.
       ALLOWED_ORIGINS: http://127.0.0.1:3000
+      # Every browser spec registers its own account, and a whole shard's
+      # worth of specs can land inside the same rate-limit window — F-016's
+      # e2e suite hit the real per-IP default and failed for real, not as a
+      # flake. The load job right below already raises both limits for the
+      # identical reason; this job needs the same headroom.
+      RATE_LIMIT_MAX: '100000'
+      AUTH_RATE_LIMIT_MAX: '100000'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

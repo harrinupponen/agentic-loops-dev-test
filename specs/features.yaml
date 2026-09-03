@@ -49,14 +49,14 @@ features:
   - id: F-006
     title: Web UI — app shell and auth screens
     spec: specs/features/F-006-web-ui.md
-    status: in-progress
+    status: done
     deps: [F-003]
     risk_tags: [frontend, auth, security, infra]
 
   - id: F-007
     title: Idempotency keys for unsafe requests
     spec: specs/features/F-007-idempotency.md
-    status: in-progress
+    status: done
     deps: [F-003]
     risk_tags: [reliability]
 

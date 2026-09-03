@@ -63,3 +63,22 @@ describe('the web client contains no HTML-injection sinks', () => {
     }
   });
 });
+
+describe('the web client binds only to ids that exist', () => {
+  it('finds every byId() id in index.html', () => {
+    const html = readFileSync(join(WEB_DIR, 'index.html'), 'utf8');
+    const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]!));
+
+    const requested = filesUnder(join(WEB_DIR, 'src')).flatMap((file) =>
+      [...readFileSync(file, 'utf8').matchAll(/byId(?:<[^>]*>)?\(\s*'([^']+)'/g)].map((m) => ({
+        file: relative(WEB_DIR, file),
+        id: m[1]!,
+      })),
+    );
+
+    // byId() throws at runtime for a missing element, which in the browser is a
+    // blank panel. Catch the typo here instead.
+    expect(requested.length).toBeGreaterThan(0);
+    expect(requested.filter(({ id }) => !ids.has(id))).toEqual([]);
+  });
+});

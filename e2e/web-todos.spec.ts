@@ -23,8 +23,47 @@ function gate(): { held: Promise<void>; release: () => void } {
 const errorBody = (code: string, message: string) =>
   JSON.stringify({ error: { code, message }, requestId: 'req-e2e' });
 
-/** Answers the next PATCH with `status`; every other call goes to the server. */
-async function failNextPatch(page: Page, status: number, code: string, message: string) {
+const json = (body: unknown) => ({
+  status: 200,
+  contentType: 'application/json',
+  body: JSON.stringify(body),
+});
+
+const TS = '2026-09-03T10:00:00.000Z';
+const stubbed = (id: string, title: string, completed = false) => ({
+  id,
+  title,
+  completed,
+  createdAt: TS,
+  updatedAt: TS,
+});
+
+/**
+ * Mounts the panel with a canned session and a canned first page, so a spec
+ * about what the client does with a *response* does not have to register an
+ * account to get one. The page, the client and the browser are still real; only
+ * the two bootstrap calls are answered from here. It also keeps the file inside
+ * the API's 10-requests-a-minute auth rate limit, which a real registration in
+ * every spec would spend on setup rather than on coverage.
+ */
+async function mountWithStubbedSession(page: Page, todos: ReturnType<typeof stubbed>[]) {
+  await page.route(
+    (url) => url.pathname === '/api/auth/me',
+    (route) =>
+      route.fulfill(
+        json({ id: '00000000-0000-4000-8000-000000000001', email: 'stub@example.com' }),
+      ),
+  );
+  await page.route(
+    (url) => url.pathname === '/api/todos',
+    (route) => route.fulfill(json({ items: todos, nextCursor: null })),
+  );
+  await page.goto('/');
+  await expect(rows(page)).toHaveCount(todos.length);
+}
+
+/** Answers every PATCH with `status`; a DELETE succeeds. */
+async function failEveryPatch(page: Page, status: number, code: string, message: string) {
   await page.route(
     (url) => url.pathname.startsWith('/api/todos/'),
     (route) =>
@@ -34,7 +73,7 @@ async function failNextPatch(page: Page, status: number, code: string, message: 
             contentType: 'application/json',
             body: errorBody(code, message),
           })
-        : route.continue(),
+        : route.fulfill({ status: 204, body: '' }),
   );
 }
 
@@ -200,11 +239,9 @@ test('a list response in flight at log out never reaches the next account', asyn
 });
 
 test('a failed toggle leaves the checkbox showing the server value', async ({ page }) => {
-  await page.goto('/');
-  await createAccount(page);
-  await addTodo(page, 'unhappy toggle');
+  await mountWithStubbedSession(page, [stubbed('t-1', 'unhappy toggle')]);
 
-  await failNextPatch(page, 500, 'internal_error', 'Boom');
+  await failEveryPatch(page, 500, 'internal_error', 'Boom');
 
   // click(), not check(): check() asserts the box stays checked, and the whole
   // point here is that the failure puts it back.
@@ -212,21 +249,15 @@ test('a failed toggle leaves the checkbox showing the server value', async ({ pa
 
   await expect(page.getByRole('alert')).toContainText('Could not update that todo.');
   await expect(page.getByRole('checkbox', { name: 'unhappy toggle' })).not.toBeChecked();
-
-  // The list GET is not intercepted — only /api/todos/:id is — so a reload
-  // reads the real state back.
-  await page.reload();
-  // Nothing was persisted either, so the reverted box is the honest one.
-  await expect(page.getByRole('checkbox', { name: 'unhappy toggle' })).not.toBeChecked();
 });
 
 test('a toggle answered with 404 drops the row and shows no error', async ({ page }) => {
-  await page.goto('/');
-  await createAccount(page);
-  await addTodo(page, 'deleted elsewhere');
-  await addTodo(page, 'surviving row');
+  await mountWithStubbedSession(page, [
+    stubbed('t-1', 'deleted elsewhere'),
+    stubbed('t-2', 'surviving row'),
+  ]);
 
-  await failNextPatch(page, 404, 'not_found', 'Todo not found');
+  await failEveryPatch(page, 404, 'not_found', 'Todo not found');
 
   // click(), not check(): the row is about to leave the DOM entirely.
   await page.getByRole('checkbox', { name: 'deleted elsewhere' }).click();
@@ -239,21 +270,19 @@ test('a toggle answered with 404 drops the row and shows no error', async ({ pag
 test('a toggle that lands after the list re-renders updates the visible checkbox', async ({
   page,
 }) => {
-  await page.goto('/');
-  await createAccount(page);
-  await addTodo(page, 'slow toggle');
-  await addTodo(page, 'other row');
+  await mountWithStubbedSession(page, [stubbed('t-1', 'slow toggle'), stubbed('t-2', 'other row')]);
 
   const { held, release } = gate();
-  let holdNext = true;
   await page.route(
     (url) => url.pathname.startsWith('/api/todos/'),
     async (route) => {
-      if (route.request().method() === 'PATCH' && holdNext) {
-        holdNext = false;
-        await held;
+      if (route.request().method() !== 'PATCH') {
+        await route.fulfill({ status: 204, body: '' });
+        return;
       }
-      await route.continue();
+      // Held open so the delete below re-renders the list first.
+      await held;
+      await route.fulfill(json(stubbed('t-1', 'slow toggle', true)));
     },
   );
 
@@ -268,8 +297,6 @@ test('a toggle that lands after the list re-renders updates the visible checkbox
   release();
   await landed;
 
-  await expect(page.getByRole('checkbox', { name: 'slow toggle' })).toBeChecked();
-  await page.reload();
   await expect(page.getByRole('checkbox', { name: 'slow toggle' })).toBeChecked();
 });
 

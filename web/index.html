@@ -77,7 +77,24 @@
         <p>Signed in as <span id="account-email"></span></p>
         <button id="logout" type="button">Log out</button>
         <section id="todo-panel" aria-label="Todos">
-          <p>Your todos will appear here.</p>
+          <form id="todo-form" aria-label="Add todo">
+            <label for="todo-title">New todo</label>
+            <input
+              id="todo-title"
+              name="title"
+              type="text"
+              autocomplete="off"
+              maxlength="500"
+              required
+            />
+            <button type="submit">Add</button>
+          </form>
+
+          <p id="todo-alert" class="alert" role="alert" aria-live="polite" tabindex="-1" hidden></p>
+          <p id="todo-status" role="status"></p>
+
+          <ul id="todo-list" aria-label="Your todos"></ul>
+          <button id="todo-more" type="button" hidden>Load more</button>
         </section>
       </section>
     </main>

@@ -1,5 +1,6 @@
 import { ApiFailure, apiFetch, GENERIC_FAILURE } from './api.js';
 import { byId, el, setText, setVisible, text } from './dom.js';
+import { mountTodoList, unmountTodoList } from './todo-list.js';
 
 interface Account {
   id: string;
@@ -50,6 +51,8 @@ function start(): void {
     setText(accountEmail, next.email);
     setVisible(signedOut, false);
     setVisible(signedIn, true);
+    // A 401 from any todo action is session expiry, not an error to nag about.
+    mountTodoList({ onUnauthorized: showSignedOut });
   }
 
   function showSignedOut(): void {
@@ -57,6 +60,8 @@ function start(): void {
     setText(accountEmail, '');
     setVisible(signedIn, false);
     setVisible(signedOut, true);
+    // Every trace of the previous account's todos leaves the page here.
+    unmountTodoList();
     showSignInForm();
   }
 

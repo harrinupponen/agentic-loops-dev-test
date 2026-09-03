@@ -101,6 +101,36 @@ describe('todos', () => {
     expect(page2.items.map((t) => t.title)).not.toEqual(page1.items.map((t) => t.title));
   });
 
+  it('a serialised nextCursor round-trips as a query parameter', async () => {
+    const { cookie } = await registerUser(ctx.app);
+    for (let i = 0; i < 21; i++) {
+      await createTodo(cookie, `todo ${i}`);
+      // The cursor is serialised to millisecond precision; spacing the rows
+      // keeps this test about the round trip and not about clock resolution.
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    // Exactly the query string web/src/todos.ts builds for the first page.
+    const first = await ctx.app.inject({ url: '/api/todos?limit=20', headers: { cookie } });
+    const page1 = first.json<{ items: { title: string }[]; nextCursor: string | null }>();
+    expect(page1.items).toHaveLength(20);
+    expect(typeof page1.nextCursor).toBe('string');
+
+    // The client treats nextCursor as opaque: it echoes the string the API
+    // serialised, percent-encoded, and never parses or recomputes it.
+    const second = await ctx.app.inject({
+      url: `/api/todos?limit=20&cursor=${encodeURIComponent(page1.nextCursor!)}`,
+      headers: { cookie },
+    });
+    const page2 = second.json<{ items: { title: string }[]; nextCursor: string | null }>();
+
+    expect(second.statusCode).toBe(200);
+    expect(page2.items.map((t) => t.title)).toEqual(['todo 0']);
+    expect(page2.nextCursor).toBeNull();
+    // No row is skipped and none is served twice across the two pages.
+    expect(new Set([...page1.items, ...page2.items].map((t) => t.title)).size).toBe(21);
+  });
+
   it('rejects an empty patch body', async () => {
     const { cookie } = await registerUser(ctx.app);
     const todo = await createTodo(cookie, 'unchanged');

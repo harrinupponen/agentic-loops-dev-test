@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { requestFingerprint } from '../../src/lib/idempotency.js';
@@ -93,6 +94,21 @@ describe('idempotency keys on POST /api/todos', () => {
     const first = await post(cookie, 'buy milk', KEY);
     const second = await post(cookie, 'buy milk', KEY);
 
+    expect(second.statusCode).toBe(201);
+    expect(second.headers['idempotency-replayed']).toBe('true');
+    expect(second.body).toBe(first.body);
+    expect(await listTitles(cookie)).toHaveLength(1);
+  });
+
+  it('a UUID-shaped idempotency key is accepted', async () => {
+    const { cookie } = await registerUser(ctx.app);
+    // What crypto.randomUUID() produces in the browser: 36 chars of [0-9a-f-].
+    const key = randomUUID();
+
+    const first = await post(cookie, 'buy milk', key);
+    const second = await post(cookie, 'buy milk', key);
+
+    expect(first.statusCode).toBe(201);
     expect(second.statusCode).toBe(201);
     expect(second.headers['idempotency-replayed']).toBe('true');
     expect(second.body).toBe(first.body);

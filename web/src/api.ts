@@ -6,6 +6,8 @@
 export interface ApiRequest {
   method?: string;
   body?: unknown;
+  /** Merged after the defaults, so the caller wins. The only way to send an Idempotency-Key. */
+  headers?: Record<string, string>;
 }
 
 /** Every non-2xx outcome, including transport failures, arrives as one of these. */
@@ -45,6 +47,7 @@ export async function apiFetch<T>(path: string, request: ApiRequest = {}): Promi
   const hasBody = request.body !== undefined;
   const headers: Record<string, string> = { accept: 'application/json' };
   if (hasBody) headers['content-type'] = 'application/json';
+  Object.assign(headers, request.headers);
 
   const response = await fetch(path, {
     method: request.method ?? 'GET',

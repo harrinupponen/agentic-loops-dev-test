@@ -4,7 +4,12 @@ name: E2E
 # intermediate push from a fix loop.
 on:
   pull_request:
-    types: [ready_for_review, labeled, synchronize]
+    # `opened` covers a PR created non-draft in one shot — without it, that
+    # first push gets no e2e run until something re-triggers `synchronize`
+    # or a human adds `run-e2e` (see docs/phase1-findings.md, item 9: this
+    # silently skipped real coverage on F-006's PR until caught by hand).
+    # The job's own `if:` below still skips actual drafts, so this is safe.
+    types: [opened, ready_for_review, labeled, synchronize]
   push:
     branches: [main]
 

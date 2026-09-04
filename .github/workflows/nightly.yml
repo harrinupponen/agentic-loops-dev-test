@@ -68,6 +68,11 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm }
       - run: npm ci
+      # The npm bundled with actions/setup-node's Node 22 still calls the
+      # registry's legacy "quick audit" endpoint, which npm is retiring and
+      # now returns 400 for our lockfile. Newer npm uses the bulk advisory
+      # endpoint instead.
+      - run: npm install -g npm@latest
       - run: npm audit --audit-level=moderate
       - run: npx osv-scanner scan --lockfile=package-lock.json
         continue-on-error: true

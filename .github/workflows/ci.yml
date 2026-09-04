@@ -169,6 +169,13 @@ jobs:
         if: github.event_name == 'pull_request'
         run: node scripts/ci/migration-safety.mjs origin/${{ github.base_ref }}
 
+      - name: Upgrade npm
+        # The npm bundled with actions/setup-node's Node 22 still calls the
+        # registry's legacy "quick audit" endpoint, which npm is retiring and
+        # now returns 400 for our lockfile. Newer npm uses the bulk advisory
+        # endpoint instead.
+        run: npm install -g npm@latest
+
       - name: Dependency audit
         # Scoped to what actually ships: dev-only advisories here are all in
         # vitest/vite's UI dev-server code path, which nothing in this repo

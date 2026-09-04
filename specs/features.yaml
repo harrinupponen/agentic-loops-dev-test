@@ -121,6 +121,6 @@ features:
   - id: F-016
     title: Web UI — todo list screen
     spec: specs/features/F-016-web-todo-list.md
-    status: in-progress
+    status: done
     deps: [F-006]
     risk_tags: [frontend]

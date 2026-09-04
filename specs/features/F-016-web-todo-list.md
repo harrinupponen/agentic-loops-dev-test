@@ -358,10 +358,10 @@ describing human behaviour instead of scripts.
   production traffic before this feature; a non-zero `429` share here means real
   users are being throttled mid-interaction, which is the thing to watch on day
   one.
-- `idempotency_outcomes_total{outcome="stored"}` should rise roughly in step with
+- `idempotency_requests_total{outcome="stored"}` should rise roughly in step with
   `POST /api/todos` — that is the proof the browser is actually sending the
   header rather than silently omitting it.
-- `idempotency_outcomes_total{outcome="conflict"}` **should stay at approximately
+- `idempotency_requests_total{outcome="conflict"}` **should stay at approximately
   zero.** ADR 0005 calls a key reused for a different body a client bug, and after
   this feature the client in question is this one. A rising `conflict` rate is a
   direct signal that the key-per-title lifecycle is broken, and it is the single

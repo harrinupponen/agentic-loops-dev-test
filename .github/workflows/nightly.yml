@@ -68,6 +68,23 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm }
       - run: npm ci
-      - run: npm audit --audit-level=moderate
+      # The npm bundled with actions/setup-node's Node 22 still calls the
+      # registry's legacy "quick audit" endpoint, which npm is retiring and
+      # now returns 400 for our lockfile. Newer npm uses the bulk advisory
+      # endpoint instead.
+      - run: npm install -g npm@latest
+      # npm's advisory endpoints have been flaky (400s from the retired
+      # quick-audit endpoint, 503s and multi-minute hangs from the bulk
+      # endpoint that replaced it), so retry a few times with a per-attempt
+      # timeout rather than let one bad registry response fail the gate.
+      - run: |
+          for attempt in 1 2 3; do
+            if timeout 90 npm audit --audit-level=moderate; then
+              exit 0
+            fi
+            echo "npm audit attempt $attempt failed or timed out; retrying..."
+            sleep 15
+          done
+          exit 1
       - run: npx osv-scanner scan --lockfile=package-lock.json
         continue-on-error: true

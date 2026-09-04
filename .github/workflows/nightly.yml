@@ -39,7 +39,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: npm }
-      - run: npm ci
+      # NODE_ENV=production is set above for the app under test, but npm
+      # reads it too and silently omits devDependencies (tsx, typescript,
+      # ...) unless told otherwise — same fix already applied in
+      # e2e.yml/deploy.yml, missing here until now.
+      - run: npm ci --include=dev
       - run: mkdir -p .ci/reports
       - run: npm run build
       - run: npm run db:migrate

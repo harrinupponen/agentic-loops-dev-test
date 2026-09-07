@@ -53,10 +53,10 @@ Two new endpoints, plus one changed response body and one changed side effect on
 `POST /api/auth/register`. Both new routes are registered unconditionally in every
 environment, so the deployed surface matches `openapi.json` everywhere.
 
-| Method | Path                              | Auth        | Notes                                                                                                              |
-| ------ | --------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------ |
-| POST   | `/api/auth/verify-email`          | **session** | No body. `202` with an empty body. Re-issues and re-sends. Rate limit `AUTH_RATE_LIMIT_MAX`/minute (`authRateLimit`) |
-| POST   | `/api/auth/verify-email/confirm`  | none        | Body `{ token }`. `204` on success. Rate limit `AUTH_RATE_LIMIT_MAX`/minute                                        |
+| Method | Path                             | Auth        | Notes                                                                                                                |
+| ------ | -------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/auth/verify-email`         | **session** | No body. `202` with an empty body. Re-issues and re-sends. Rate limit `AUTH_RATE_LIMIT_MAX`/minute (`authRateLimit`) |
+| POST   | `/api/auth/verify-email/confirm` | none        | Body `{ token }`. `204` on success. Rate limit `AUTH_RATE_LIMIT_MAX`/minute                                          |
 
 `POST /api/auth/register` keeps its `201` and its session cookie, and additionally
 issues a verification token and dispatches one message. The response body gains
@@ -64,19 +64,19 @@ issues a verification token and dispatches one message. The response body gains
 
 Resend (`POST /api/auth/verify-email`):
 
-| Situation                                          | Response                             | Side effect                                          |
-| -------------------------------------------------- | ------------------------------------ | ------------------------------------------------------ |
-| Signed in, unverified, no token issued in the last 60 s | `202`, empty body                | Token row written (replacing any previous), mail sent |
-| Signed in, unverified, token issued < 60 s ago     | `202`, empty body                    | **Nothing.** Previous token stays valid, no second mail |
-| Signed in, already verified                        | `409 { code: "already_verified" }`   | None                                                  |
-| No session, or an expired one                      | `401 { code: "unauthorized" }`       | None                                                  |
-| Over the rate limit                                | `429 { code: "rate_limited" }`       | None                                                  |
+| Situation                                               | Response                           | Side effect                                             |
+| ------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------- |
+| Signed in, unverified, no token issued in the last 60 s | `202`, empty body                  | Token row written (replacing any previous), mail sent   |
+| Signed in, unverified, token issued < 60 s ago          | `202`, empty body                  | **Nothing.** Previous token stays valid, no second mail |
+| Signed in, already verified                             | `409 { code: "already_verified" }` | None                                                    |
+| No session, or an expired one                           | `401 { code: "unauthorized" }`     | None                                                    |
+| Over the rate limit                                     | `429 { code: "rate_limited" }`     | None                                                    |
 
 Confirm (`POST /api/auth/verify-email/confirm`):
 
-| Situation                                | Response                            | Side effect                                          |
-| ---------------------------------------- | ----------------------------------- | ------------------------------------------------------ |
-| Token exists and is unexpired            | `204`, empty body                   | `users.email_verified_at = now()`, token row deleted |
+| Situation                                | Response                            | Side effect                                           |
+| ---------------------------------------- | ----------------------------------- | ----------------------------------------------------- |
+| Token exists and is unexpired            | `204`, empty body                   | `users.email_verified_at = now()`, token row deleted  |
 | Token unknown, already used, or replaced | `400 { code: "invalid_token" }`     | None                                                  |
 | Token exists but past `expires_at`       | `400 { code: "token_expired" }`     | None (the transaction rolls back, the dead row stays) |
 | Token wrong length or charset            | `400 { code: "validation_failed" }` | None                                                  |
@@ -242,7 +242,7 @@ as above, dispatch, reply `202`.
 **Confirm.** Hash the submitted token, then in one transaction:
 
 - `DELETE FROM email_verification_tokens WHERE token_hash = $1 RETURNING user_id, expires_at`
-  — deleting *is* the single-use check, one atomic statement, and two concurrent
+  — deleting _is_ the single-use check, one atomic statement, and two concurrent
   confirms cannot both win.
 - No row → `badRequest('invalid_token', ...)`; the transaction rolls back.
 - `expires_at <= now()` → `badRequest('token_expired', ...)`; rolls back, so the
@@ -370,7 +370,7 @@ metric shows it: `mail_messages_total{transport="drop"}`.
       writes no row, and sends nothing —
       `integration: resending for a verified account is refused`
 - [ ] `register`, `login`, and `GET /api/auth/me` all return `emailVerified:
-      false` for a fresh account and `true` after confirmation —
+false` for a fresh account and `true` after confirmation —
       `integration: verification state is visible on every user view`
 - [ ] An unverified account can log in, create, list, update, and delete todos,
       and can request a password reset — no endpoint gates on verification, which
@@ -400,12 +400,12 @@ metric shows it: `mail_messages_total{transport="drop"}`.
 
 ## Test plan
 
-| Layer       | Cases                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| unit        | `generateRecoveryToken` length, charset, uniqueness across 1000 draws · `hashRecoveryToken` against a known sha256 vector · `RecoveryTokenSchema` accepts 43 and rejects 42/44/`+`/`/`/empty · `recoveryTokenExpiry` arithmetic for `EMAIL_VERIFICATION_TTL_HOURS * 60` · `loadConfig` TTL default, coercion, and rejection                                                                                                                                       |
+| Layer       | Cases                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| unit        | `generateRecoveryToken` length, charset, uniqueness across 1000 draws · `hashRecoveryToken` against a known sha256 vector · `RecoveryTokenSchema` accepts 43 and rejects 42/44/`+`/`/`/empty · `recoveryTokenExpiry` arithmetic for `EMAIL_VERIFICATION_TTL_HOURS * 60` · `loadConfig` TTL default, coercion, and rejection                                                                                                                                                                                                                                               |
 | integration | happy path (register → confirm → `emailVerified: true`) · **validation failure with `details` preserved** · **unauthenticated: resend returns `401`; confirm is public by design, asserted, and asserted to set no cookie** · **other user's resource: A's session submitting B's token verifies B, not A** · duplicate registration sends nothing · mailer rejection does not fail signup · replay · expiry · unknown token · cooldown · supersede · `409 already_verified` · no endpoint gated on verification · log-content scan · `drop` transport · metrics presence |
-| e2e         | **None. Deliberate — same four reasons as F-004**, which apply here unchanged: no browser surface exists; the raw token lives only inside the injected mailer, which is in the integration process; `deploy.yml` runs the whole Playwright suite against `STAGING_URL` where no `DATABASE_URL` exists; and `test-integrity.mjs` forbids the `test.skip` that excluding it would need. The journey belongs with F-018, when a screen and a delivered mail exist. |
-| load        | No new k6 scenario. The registration path is already in `load/smoke.js`, and what this adds to it is one indexed upsert and a `drop`-transport call that returns a resolved promise. A scenario would measure the argon2 hash `POST /api/auth/register` already measures. If registration p95 moves after this ships, the existing `http_request_duration_seconds` for that route is where it shows.                                                             |
+| e2e         | **None. Deliberate — same four reasons as F-004**, which apply here unchanged: no browser surface exists; the raw token lives only inside the injected mailer, which is in the integration process; `deploy.yml` runs the whole Playwright suite against `STAGING_URL` where no `DATABASE_URL` exists; and `test-integrity.mjs` forbids the `test.skip` that excluding it would need. The journey belongs with F-018, when a screen and a delivered mail exist.                                                                                                           |
+| load        | No new k6 scenario. The registration path is already in `load/smoke.js`, and what this adds to it is one indexed upsert and a `drop`-transport call that returns a resolved promise. A scenario would measure the argon2 hash `POST /api/auth/register` already measures. If registration p95 moves after this ships, the existing `http_request_duration_seconds` for that route is where it shows.                                                                                                                                                                      |
 
 ## Security considerations
 

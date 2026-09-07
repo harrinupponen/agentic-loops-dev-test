@@ -7,7 +7,7 @@ Status: Accepted
 
 F-005 adds email verification: a token is mailed at signup, confirming it records
 that the address is real. The open question is not how to issue the token — ADR
-0009 settled that — but what the application should *do* with the answer.
+0009 settled that — but what the application should _do_ with the answer.
 
 The obvious design gates something on it: unverified accounts cannot log in,
 cannot create todos, or lose access after a grace period. That is what
@@ -49,9 +49,9 @@ on it.**
 
 **When enforcement is wanted, it arrives as its own feature, with its own ADR, and
 it carries a boot rule.** That rule is the ADR 0007-shaped part of this decision,
-and it is stated now so the later feature inherits it: *a build that enforces
+and it is stated now so the later feature inherits it: _a build that enforces
 verification must refuse to start when the configured mail transport does not
-deliver.* Enforcement and `MAIL_TRANSPORT=drop` are a lockout, and the process is
+deliver._ Enforcement and `MAIL_TRANSPORT=drop` are a lockout, and the process is
 the only thing positioned to notice.
 
 ## Consequences

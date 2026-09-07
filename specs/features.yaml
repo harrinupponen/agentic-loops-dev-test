@@ -29,10 +29,14 @@ features:
     deps: [F-002]
     risk_tags: []
 
+  # Split during planning: the API is F-004, the browser screens are F-017 at the
+  # bottom of this file. F-006 had already deferred reset screens ("the UI gains
+  # them when they do"), so F-004 has no browser surface and therefore no e2e
+  # journey; that journey belongs to F-017. See the spec's "Backlog split".
   - id: F-004
     title: Password reset via emailed single-use token
     spec: specs/features/F-004-password-reset.md
-    status: todo
+    status: spec
     deps: [F-002]
     risk_tags: [auth, pii, security, email]
 
@@ -124,3 +128,14 @@ features:
     status: done
     deps: [F-006]
     risk_tags: [frontend]
+
+  # Split out of F-004 (see the comment on it). Plan this one only after F-004
+  # has been reviewed, so it inherits whatever the human changed about the API,
+  # and only once a real mail transport exists — F-004 ships with
+  # MAIL_TRANSPORT=drop in production, so these screens would be unusable there.
+  - id: F-017
+    title: Web UI — password reset screens
+    spec: specs/features/F-017-web-password-reset.md
+    status: todo
+    deps: [F-004, F-006]
+    risk_tags: [frontend, auth, security]

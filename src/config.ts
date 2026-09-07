@@ -24,6 +24,20 @@ export const EnvSchema = z.object({
   // Deliberately tighter than RATE_LIMIT_MAX and configured separately: auth
   // endpoints are the cheapest place to mount a credential-stuffing attack.
   AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(10),
+  /** How long an emailed password-reset token stays usable. */
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(1).default(30),
+  /**
+   * Per hour, per IP. Far tighter than AUTH_RATE_LIMIT_MAX because this route
+   * costs someone else an email; the per-account cooldown in the upsert is what
+   * bounds abuse aimed at one victim.
+   */
+  PASSWORD_RESET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(5),
+  /**
+   * `console` prints the reset token to stdout for local development and
+   * refuses to boot under NODE_ENV=production; `drop` sends nothing and is what
+   * production runs until a real transport exists. See src/lib/mailer.ts.
+   */
+  MAIL_TRANSPORT: z.enum(['console', 'drop']).default('console'),
   TRUST_PROXY: boolish.default(false),
   /**
    * Comma-separated origin allowlist used for the CSRF origin check. Empty =

@@ -23,6 +23,27 @@ export function registerMetrics(app: FastifyInstance) {
     registers: [registry],
   });
 
+  // The signal that matters is the ratio: `requested` climbing while
+  // `consumed` stays flat means mail is not arriving or links are expiring.
+  // `requested` increments regardless of whether the address matched an
+  // account — deliberately, so this counter is not an enumeration oracle.
+  const passwordResets = new client.Counter({
+    name: 'password_reset_total',
+    help: 'Password reset attempts by outcome',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
+
+  // The only proof that the un-awaited send actually happened. A rising
+  // `failed` is page-worthy: the user already got their 202, so nothing else
+  // surfaces it.
+  const mailMessages = new client.Counter({
+    name: 'mail_messages_total',
+    help: 'Outbound mail by kind, transport, and outcome',
+    labelNames: ['kind', 'transport', 'outcome'],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -38,7 +59,7 @@ export function registerMetrics(app: FastifyInstance) {
     return registry.metrics();
   });
 
-  return { registry, idempotencyRequests };
+  return { registry, idempotencyRequests, passwordResets, mailMessages };
 }
 
 export type Metrics = ReturnType<typeof registerMetrics>;

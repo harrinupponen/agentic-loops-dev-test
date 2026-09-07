@@ -31,6 +31,9 @@ export async function createTestContext(
     RATE_LIMIT_MAX: '10000',
     SHUTDOWN_GRACE_MS: '0',
     ALLOWED_ORIGINS: '',
+    // Never print a reset token during a test run; cases that need to read one
+    // inject a fake mailer through BuildOptions instead (ADR 0010).
+    MAIL_TRANSPORT: 'drop',
     WEB_ROOT: NO_WEB_CLIENT,
     ...overrides,
   });
@@ -59,7 +62,7 @@ export async function createTestContext(
 /** Cascading truncate keeps tests independent without paying for a fresh schema. */
 export async function resetDb(db: Database) {
   await db.execute(
-    sql`TRUNCATE TABLE idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE password_reset_tokens, idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
   );
 }
 

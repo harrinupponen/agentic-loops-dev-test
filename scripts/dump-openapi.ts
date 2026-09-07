@@ -22,6 +22,11 @@ const config: Config = {
   RATE_LIMIT_MAX: 100,
   RATE_LIMIT_WINDOW: '1 minute',
   AUTH_RATE_LIMIT_MAX: 10,
+  PASSWORD_RESET_TTL_MINUTES: 30,
+  PASSWORD_RESET_RATE_LIMIT_MAX: 5,
+  // `drop` rather than the `console` default: this script must never be the
+  // thing that prints a token, and it sends no mail anyway.
+  MAIL_TRANSPORT: 'drop',
   TRUST_PROXY: false,
   ALLOWED_ORIGINS: '',
   // Deliberately a path with no client: the web routes are hidden from the

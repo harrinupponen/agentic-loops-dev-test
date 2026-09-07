@@ -70,6 +70,21 @@ export const idempotencyKeys = pgTable(
   (t) => [primaryKey({ columns: [t.userId, t.key] })],
 );
 
+// One live reset token per account: the primary key on user_id *is* the
+// "at most one" invariant, and issuing is an upsert on it. Consuming is a
+// DELETE on token_hash, served by the unique constraint. No secondary index,
+// and no retention job — the table is capped at one row per account.
+// See docs/adr/0009-single-use-recovery-tokens.md.
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  // sha256 of the opaque token; the raw token never touches the database.
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   todos: many(todos),
@@ -88,6 +103,7 @@ export const schema = {
   sessions,
   todos,
   idempotencyKeys,
+  passwordResetTokens,
   usersRelations,
   sessionsRelations,
   todosRelations,

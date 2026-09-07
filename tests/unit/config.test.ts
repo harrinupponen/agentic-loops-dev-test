@@ -14,6 +14,22 @@ describe('loadConfig', () => {
     expect(config.SESSION_TTL_HOURS).toBe(168);
   });
 
+  it('defaults the email verification TTL to 24 hours and coerces a string', () => {
+    expect(loadConfig(base).EMAIL_VERIFICATION_TTL_HOURS).toBe(24);
+    expect(
+      loadConfig({ ...base, EMAIL_VERIFICATION_TTL_HOURS: '48' }).EMAIL_VERIFICATION_TTL_HOURS,
+    ).toBe(48);
+  });
+
+  it('rejects a zero or non-integer email verification TTL', () => {
+    expect(() => loadConfig({ ...base, EMAIL_VERIFICATION_TTL_HOURS: '0' })).toThrow(
+      /EMAIL_VERIFICATION_TTL_HOURS/,
+    );
+    expect(() => loadConfig({ ...base, EMAIL_VERIFICATION_TTL_HOURS: '1.5' })).toThrow(
+      /EMAIL_VERIFICATION_TTL_HOURS/,
+    );
+  });
+
   it('rejects a short cookie secret', () => {
     expect(() => loadConfig({ ...base, COOKIE_SECRET: 'too-short' })).toThrow(/COOKIE_SECRET/);
   });

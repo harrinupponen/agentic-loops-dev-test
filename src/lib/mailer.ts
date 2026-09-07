@@ -12,6 +12,12 @@ export interface Mailer {
   readonly transport: string;
   /** Must not hang: a network implementation applies its own timeout. */
   sendPasswordReset(message: { to: string; token: string; expiresAt: Date }): Promise<void>;
+  /**
+   * A method per kind rather than `send(kind, message)`: the interface names
+   * what it can send, so a new kind is a compile error everywhere it must be
+   * handled instead of a string that silently does nothing.
+   */
+  sendEmailVerification(message: { to: string; token: string; expiresAt: Date }): Promise<void>;
 }
 
 /**
@@ -26,7 +32,7 @@ class ConsoleMailer implements Mailer {
   constructor(nodeEnv: Config['NODE_ENV']) {
     if (nodeEnv === 'production') {
       throw new Error(
-        'MAIL_TRANSPORT=console prints reset tokens to stdout and refuses to run in production. ' +
+        'MAIL_TRANSPORT=console prints recovery tokens to stdout and refuses to run in production. ' +
           'Set MAIL_TRANSPORT=drop until a real transport exists.',
       );
     }
@@ -35,6 +41,14 @@ class ConsoleMailer implements Mailer {
   sendPasswordReset(message: { to: string; token: string; expiresAt: Date }): Promise<void> {
     process.stdout.write(
       `[mail:password-reset] to=${message.to} token=${message.token} ` +
+        `expires=${message.expiresAt.toISOString()}\n`,
+    );
+    return Promise.resolve();
+  }
+
+  sendEmailVerification(message: { to: string; token: string; expiresAt: Date }): Promise<void> {
+    process.stdout.write(
+      `[mail:email-verification] to=${message.to} token=${message.token} ` +
         `expires=${message.expiresAt.toISOString()}\n`,
     );
     return Promise.resolve();
@@ -51,6 +65,10 @@ class DropMailer implements Mailer {
   readonly transport = 'drop';
 
   sendPasswordReset(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  sendEmailVerification(): Promise<void> {
     return Promise.resolve();
   }
 }

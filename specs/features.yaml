@@ -36,7 +36,7 @@ features:
   - id: F-004
     title: Password reset via emailed single-use token
     spec: specs/features/F-004-password-reset.md
-    status: spec
+    status: in-progress
     deps: [F-002]
     risk_tags: [auth, pii, security, email]
 

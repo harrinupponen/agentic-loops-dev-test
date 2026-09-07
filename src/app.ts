@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { allowedOrigins, type Config } from './config.js';
 import type { Database } from './db/client.js';
 import { forbidden } from './lib/errors.js';
+import { createMailer, type Mailer } from './lib/mailer.js';
 import { createSessionLoader } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
@@ -32,6 +33,12 @@ declare module 'fastify' {
 export interface BuildOptions {
   /** Redirects the logger somewhere a test can read; defaults to stdout. */
   logStream?: NodeJS.WritableStream;
+  /**
+   * Overrides the transport built from MAIL_TRANSPORT. This is the only
+   * supported way for a test to observe an outgoing message, and the reason no
+   * "get my token" route exists anywhere (ADR 0010).
+   */
+  mailer?: Mailer;
 }
 
 export async function buildApp(
@@ -39,6 +46,10 @@ export async function buildApp(
   db: Database,
   options: BuildOptions = {},
 ): Promise<FastifyInstance> {
+  // First, before anything is allocated: an unsafe transport must refuse the
+  // boot rather than serve one request. See src/lib/mailer.ts and ADR 0007.
+  const mailer = options.mailer ?? createMailer(config);
+
   const app = Fastify({
     trustProxy: config.TRUST_PROXY,
     // Bounded body size: the default is 1 MiB, made explicit so it is reviewable.
@@ -132,7 +143,7 @@ export async function buildApp(
   });
 
   registerErrorHandler(app);
-  const metrics = registerMetrics(app);
+  const metrics = registerMetrics(app, config);
 
   const origins = allowedOrigins(config);
   if (origins.length > 0) {
@@ -155,7 +166,7 @@ export async function buildApp(
   const idempotency = registerIdempotency(app, db, config, metrics.idempotencyRequests);
 
   registerHealthRoutes(app, db);
-  registerAuthRoutes(app, db, config);
+  registerAuthRoutes(app, db, config, mailer, metrics);
   registerTodoRoutes(app, db, idempotency);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.
   await registerWebRoutes(app, config);

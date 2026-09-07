@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestContext, type TestContext } from './helpers.js';
+import { createTestContext, metricsAuth, type TestContext } from './helpers.js';
 
 let ctx: TestContext;
 
@@ -32,7 +32,7 @@ describe('health', () => {
   });
 
   it('exposes prometheus metrics', async () => {
-    const res = await ctx.app.inject({ url: '/metrics' });
+    const res = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('http_request_duration_seconds');
   });

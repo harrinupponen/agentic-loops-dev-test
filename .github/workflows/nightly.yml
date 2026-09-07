@@ -27,6 +27,7 @@ jobs:
     env:
       DATABASE_URL: postgres://app:app@localhost:5432/app_soak
       COOKIE_SECRET: soak-cookie-secret-that-is-long-enough
+      METRICS_TOKEN: soak-metrics-token-that-is-long-enough
       NODE_ENV: production
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '1000000'

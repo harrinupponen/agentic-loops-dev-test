@@ -40,10 +40,15 @@ features:
     deps: [F-002]
     risk_tags: [auth, pii, security, email]
 
+  # Split during planning: F-004's rollout notes parked "the real mail transport"
+  # and the password-changed notification here. Both moved to F-018 at the bottom
+  # of this file — a provider adapter is a dependency, credentials, a link format
+  # and a retry story, and it is not email verification. See the spec's
+  # "Backlog split". Nothing is gated on verification; see ADR 0011.
   - id: F-005
     title: Email verification on signup
     spec: specs/features/F-005-email-verification.md
-    status: todo
+    status: spec
     deps: [F-004]
     risk_tags: [auth, pii, email]
 
@@ -139,3 +144,15 @@ features:
     status: todo
     deps: [F-004, F-006]
     risk_tags: [frontend, auth, security]
+
+  # Split out of F-005 (see the comment on it). Until this ships, both mail flows
+  # run MAIL_TRANSPORT=drop and deliver nothing: F-004 issues reset tokens nobody
+  # receives and F-005 verifies addresses nobody can confirm. Owns the provider
+  # adapter, APP_BASE_URL and the link format, bounce/retry handling, and the
+  # "your password was changed" notification F-004 parked on F-005.
+  - id: F-018
+    title: Real outbound mail transport
+    spec: specs/features/F-018-mail-transport.md
+    status: todo
+    deps: [F-004, F-005]
+    risk_tags: [email, infra, security]

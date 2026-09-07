@@ -3,7 +3,7 @@ import { Writable } from 'node:stream';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { passwordResetTokens } from '../../src/db/schema.js';
 import type { Mailer } from '../../src/lib/mailer.js';
-import { generateResetToken, hashResetToken } from '../../src/lib/reset-token.js';
+import { generateRecoveryToken, hashRecoveryToken } from '../../src/lib/recovery-token.js';
 import {
   createTestContext,
   metricsAuth,
@@ -30,6 +30,8 @@ function recordingMailer() {
       sent.push(message);
       return Promise.resolve();
     },
+    // Registration dispatches one of these; this suite does not assert on them.
+    sendEmailVerification: () => Promise.resolve(),
   };
   return { mailer, sent };
 }
@@ -138,7 +140,7 @@ describe('password reset — request', () => {
       .from(passwordResetTokens)
       .where(eq(passwordResetTokens.userId, user.id));
     const row = rows[0]!;
-    expect(row.tokenHash).toBe(hashResetToken(raw));
+    expect(row.tokenHash).toBe(hashRecoveryToken(raw));
     // The raw token appears nowhere in the row, under any column.
     expect(JSON.stringify(row)).not.toContain(raw);
   });
@@ -153,7 +155,7 @@ describe('password reset — request', () => {
     expect(second.statusCode).toBe(202);
     expect(sent).toHaveLength(1); // no second message
     const rows = await ctx.db.select().from(passwordResetTokens);
-    expect(rows[0]!.tokenHash).toBe(hashResetToken(firstToken));
+    expect(rows[0]!.tokenHash).toBe(hashRecoveryToken(firstToken));
 
     // and the first token is still usable
     expect((await confirmReset({ token: firstToken, password: NEW_PASSWORD })).statusCode).toBe(
@@ -173,7 +175,7 @@ describe('password reset — request', () => {
 
     const rows = await ctx.db.select().from(passwordResetTokens);
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.tokenHash).toBe(hashResetToken(secondToken));
+    expect(rows[0]!.tokenHash).toBe(hashRecoveryToken(secondToken));
 
     const replayed = await confirmReset({ token: firstToken, password: NEW_PASSWORD });
     expect(replayed.statusCode).toBe(400);
@@ -267,7 +269,7 @@ describe('password reset — confirm', () => {
   it('an unknown token is rejected', async () => {
     await registerUser(ctx.app, 'unknown@example.com');
 
-    const res = await confirmReset({ token: generateResetToken(), password: NEW_PASSWORD });
+    const res = await confirmReset({ token: generateRecoveryToken(), password: NEW_PASSWORD });
 
     expect(res.statusCode).toBe(400);
     expect(res.json<{ error: { code: string } }>().error.code).toBe('invalid_token');
@@ -311,7 +313,7 @@ describe('password reset — confirm', () => {
       { token: 'a'.repeat(42), password: NEW_PASSWORD },
       { token: 'a'.repeat(44), password: NEW_PASSWORD },
       { token: `${'a'.repeat(42)}/`, password: NEW_PASSWORD },
-      { token: generateResetToken(), password: 'short' },
+      { token: generateRecoveryToken(), password: 'short' },
     ];
 
     for (const payload of bad) {
@@ -424,10 +426,10 @@ describe('password reset — operational surface', () => {
 
       // Nothing was delivered, so the raw token is unobtainable by design. Seed
       // a known hash to prove the confirm route still works under `drop`.
-      const token = generateResetToken();
+      const token = generateRecoveryToken();
       await dropped.db
         .update(passwordResetTokens)
-        .set({ tokenHash: hashResetToken(token) })
+        .set({ tokenHash: hashRecoveryToken(token) })
         .where(eq(passwordResetTokens.userId, user.id));
 
       const confirm = await dropped.app.inject({
@@ -451,7 +453,7 @@ describe('password reset — operational surface', () => {
     await requestReset('metrics@example.com');
     const token = sent[0]!.token;
 
-    await confirmReset({ token: generateResetToken(), password: NEW_PASSWORD }); // invalid
+    await confirmReset({ token: generateRecoveryToken(), password: NEW_PASSWORD }); // invalid
     await ctx.db
       .update(passwordResetTokens)
       .set({ expiresAt: new Date(Date.now() - 1000) })

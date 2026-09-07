@@ -33,6 +33,12 @@ export const EnvSchema = z.object({
    */
   PASSWORD_RESET_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(5),
   /**
+   * How long an emailed verification token stays usable. Hours, not minutes: a
+   * reset token is used within minutes of being asked for, while a verification
+   * mail is routinely opened the next morning.
+   */
+  EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().min(1).default(24),
+  /**
    * `console` prints the reset token to stdout for local development and
    * refuses to boot under NODE_ENV=production; `drop` sends nothing and is what
    * production runs until a real transport exists. See src/lib/mailer.ts.

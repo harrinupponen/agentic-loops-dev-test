@@ -37,6 +37,17 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // `issued` climbing while `consumed` stays at zero means either mail is not
+  // arriving or nobody can act on it — which, until a real transport exists, is
+  // the expected reading in production (ADR 0011). The cooldown path increments
+  // nothing, so a flat `resent` is distinguishable from a broken route.
+  const emailVerifications = new client.Counter({
+    name: 'email_verification_total',
+    help: 'Email verification events by outcome',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
+
   // The only proof that the un-awaited send actually happened. A rising
   // `failed` is page-worthy: the user already got their 202, so nothing else
   // surfaces it.
@@ -85,7 +96,7 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     },
   );
 
-  return { registry, idempotencyRequests, passwordResets, mailMessages };
+  return { registry, idempotencyRequests, passwordResets, emailVerifications, mailMessages };
 }
 
 export type Metrics = ReturnType<typeof registerMetrics>;

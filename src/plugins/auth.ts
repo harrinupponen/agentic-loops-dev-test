@@ -67,6 +67,8 @@ export function createSessionLoader(db: Database) {
         expiresAt: sessions.expiresAt,
         userId: users.id,
         email: users.email,
+        // One more column on a query that already runs, not a second query.
+        emailVerifiedAt: users.emailVerifiedAt,
       })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
@@ -80,7 +82,13 @@ export function createSessionLoader(db: Database) {
       return;
     }
 
-    request.user = { id: row.userId, email: row.email };
+    // A derived boolean, never the timestamp: nothing authorizes on this
+    // (ADR 0011), and the client only ever needs the state.
+    request.user = {
+      id: row.userId,
+      email: row.email,
+      emailVerified: row.emailVerifiedAt !== null,
+    };
     request.sessionId = row.sessionId;
   };
 }

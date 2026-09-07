@@ -75,7 +75,7 @@ export async function createTestContext(
 /** Cascading truncate keeps tests independent without paying for a fresh schema. */
 export async function resetDb(db: Database) {
   await db.execute(
-    sql`TRUNCATE TABLE password_reset_tokens, idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE email_verification_tokens, password_reset_tokens, idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -89,5 +89,8 @@ export async function registerUser(app: FastifyInstance, email = `u${Date.now()}
   if (res.statusCode !== 201) throw new Error(`register failed: ${res.statusCode} ${res.body}`);
   const setCookie = res.headers['set-cookie'];
   const raw = Array.isArray(setCookie) ? setCookie[0]! : String(setCookie);
-  return { cookie: raw.split(';')[0]!, user: res.json<{ id: string; email: string }>() };
+  return {
+    cookie: raw.split(';')[0]!,
+    user: res.json<{ id: string; email: string; emailVerified: boolean }>(),
+  };
 }

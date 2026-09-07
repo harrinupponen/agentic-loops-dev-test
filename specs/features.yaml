@@ -48,7 +48,7 @@ features:
   - id: F-005
     title: Email verification on signup
     spec: specs/features/F-005-email-verification.md
-    status: spec
+    status: in-progress
     deps: [F-004]
     risk_tags: [auth, pii, email]
 

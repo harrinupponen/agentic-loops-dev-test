@@ -15,6 +15,10 @@ export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: text('email').notNull().unique(),
   passwordHash: text('password_hash').notNull(),
+  // Records a fact; nothing in the application authorizes on it. NULL means
+  // nobody proved control of the mailbox, including for every account that
+  // predates this column. See docs/adr/0011-email-verification-is-advisory.md.
+  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -85,6 +89,19 @@ export const passwordResetTokens = pgTable('password_reset_tokens', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// ADR 0009's shape, unchanged: same key, same unique constraint, same absence
+// of a secondary index and of a retention job. Issuing is an upsert on the
+// primary key, consuming is a DELETE on token_hash.
+export const emailVerificationTokens = pgTable('email_verification_tokens', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  // sha256 of the opaque token; the raw token never touches the database.
+  tokenHash: text('token_hash').notNull().unique(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   todos: many(todos),
@@ -104,6 +121,7 @@ export const schema = {
   todos,
   idempotencyKeys,
   passwordResetTokens,
+  emailVerificationTokens,
   usersRelations,
   sessionsRelations,
   todosRelations,

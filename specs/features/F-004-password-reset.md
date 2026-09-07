@@ -369,6 +369,18 @@ capability exist and correct; F-017 makes it reachable.
 - [ ] `password_reset_total` increments identically for a known and an unknown
       address — the metric is not an enumeration oracle —
       `integration: the request counter does not distinguish known addresses`
+- [ ] `/metrics` returns the Prometheus body for a correct bearer token, and
+      `401 unauthorized` in the standard error shape when the header is missing,
+      wrong, a prefix of the real token, or the right token under another
+      scheme — `integration: metrics authentication` (six cases)
+- [ ] With `METRICS_TOKEN` unset outside production, `/metrics` still serves
+      unauthenticated — the documented development default —
+      `integration: serves unauthenticated outside production when no token is configured`
+- [ ] `loadConfig` throws under `NODE_ENV=production` when `METRICS_TOKEN` is
+      unset, the placeholder value, or shorter than 32 characters, and accepts a
+      strong one — `unit: loadConfig` metrics token cases
+- [ ] `bearerTokenMatches` is length-independent (no throw, no early return) and
+      never matches an empty expected token — `unit: bearerTokenMatches`
 - [ ] `generateResetToken()` returns 43 base64url characters, differs across
       1000 calls, and `hashResetToken()` matches `sha256` of the input —
       `unit: reset token generation and hashing`
@@ -447,12 +459,21 @@ cleanly, with no timing analysis. Options considered:
 - Aggregate it so it cannot be attributed to one request. Rejected: Prometheus
   counters are monotonic and scraped often; there is no aggregation that survives
   a patient attacker.
-- **Chosen: keep the counter and require that `/metrics` is not internet-reachable.**
-  This is a pre-existing exposure — `/metrics` already leaks request rates, route
-  names, and process internals — that F-004 makes materially worse.
-  **Rollout precondition:** confirm `/metrics` is blocked at the Sevalla ingress
-  before this ships. Authenticating or binding `/metrics` separately belongs to
-  F-008 (observability) and is flagged on this feature's issue.
+- Keep the counter and require that `/metrics` is not internet-reachable.
+  Originally chosen, then **overtaken by review**: `/metrics` was verified to be
+  publicly fetchable on both deployed environments, with no ingress rule in front
+  of it. There was nothing to confirm — the precondition was already false.
+- **Chosen (review decision, implemented in this PR): keep the counter and
+  authenticate `/metrics`.** A bearer token (`Authorization: Bearer <token>`)
+  compared in constant time against `METRICS_TOKEN`, because this is a machine
+  endpoint and a session cookie is the wrong shape for a scraper. Per ADR 0007
+  the control fails closed at boot: `NODE_ENV=production` with `METRICS_TOKEN`
+  unset, placeholder, or under 32 characters refuses to start. Outside production
+  the default stays empty and the endpoint stays open, so local development and
+  the integration suite keep working; the boot check is what guarantees the open
+  path exists nowhere reachable. **Rollout precondition:** `METRICS_TOKEN` set on
+  Sevalla staging and production before merge. F-008 keeps the larger question of
+  isolating the endpoint on its own port or network.
 
 **Inbox bombing.** The 60-second per-account cooldown is in the database, so it
 holds across instances and across source IPs — unlike the per-IP rate limit, which
@@ -523,9 +544,12 @@ is never exercised in any test environment.
 
 **Order.**
 
-1. **Confirm `/metrics` is not reachable from the internet on staging and
-   production** (see "Security considerations"). This is a precondition, not a
-   nice-to-have.
+1. **Set `METRICS_TOKEN` on staging and production in Sevalla before merging**
+   (at least 32 random characters, different per environment; see "Security
+   considerations"). This is a precondition, not a nice-to-have: with
+   `NODE_ENV=production` and no token the container refuses to start, which is
+   safe — the previous revision keeps serving — but it is an avoidable red deploy.
+   Scrapers must then send `Authorization: Bearer <token>`.
 2. Set `MAIL_TRANSPORT=drop` on staging and production in Sevalla **before
    merging**. The default is `console`, which throws at boot under
    `NODE_ENV=production` — a merge that lands first fails the staging deploy at
@@ -535,9 +559,13 @@ is never exercised in any test environment.
    `scripts/docker-entrypoint.sh` before the server boots. Old instances during
    the rolling deploy ignore both the table and the routes.
 
-No CODEOWNERS-protected workflow file needs an environment change: the integration
-helper defaults `MAIL_TRANSPORT` to `drop` and overrides the mailer per test, and
-no e2e spec touches these routes.
+The integration helper defaults `MAIL_TRANSPORT` to `drop` and overrides the
+mailer per test, and no e2e spec touches these routes. **One CODEOWNERS-protected
+workflow does need an environment change**, created by the `/metrics` decision
+above: `.github/workflows/nightly.yml` runs the soak app with
+`NODE_ENV=production`, so it needs a `METRICS_TOKEN` (any 32+ character literal,
+alongside the existing `COOKIE_SECRET`) or the nightly soak fails at container
+start. PR CI and the e2e/load jobs are unaffected — they run `NODE_ENV=test`.
 
 **Rollback at 2am.** Redeploy the previous image. Nothing to undo: the table is
 inert without the code, outstanding tokens simply expire, and no existing column,
@@ -551,7 +579,8 @@ it entirely.
 - **F-017** — the reset screens and the browser journey (added by this plan).
 - **F-005** — the "your password was changed" notification, and the real mail
   transport both features need.
-- **F-008** — authenticating or isolating `/metrics`.
+- **F-008** — isolating `/metrics` on its own port or network. Authentication is
+  no longer part of it: this PR does that, by review decision.
 - **#11** — the `CREATE INDEX CONCURRENTLY` conflict, which this feature routes
   around rather than fixes.
 

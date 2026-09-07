@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { createTestContext, type TestContext } from './helpers.js';
+import { createTestContext, metricsAuth, type TestContext } from './helpers.js';
 
 /**
  * The browser client is served by this process, at this origin. These tests
@@ -120,7 +120,7 @@ describe('web client delivery', () => {
     await ctx.app.inject({ url: '/app/main.js' });
     await ctx.app.inject({ url: '/app/styles.css' });
 
-    const res = await ctx.app.inject({ url: '/metrics' });
+    const res = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
     const assetRoutes = new Set(
       res.body
         .split('\n')

@@ -2,7 +2,13 @@ import { randomUUID } from 'node:crypto';
 import { sql } from 'drizzle-orm';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { requestFingerprint } from '../../src/lib/idempotency.js';
-import { createTestContext, registerUser, resetDb, type TestContext } from './helpers.js';
+import {
+  createTestContext,
+  metricsAuth,
+  registerUser,
+  resetDb,
+  type TestContext,
+} from './helpers.js';
 
 let ctx: TestContext;
 
@@ -368,7 +374,7 @@ describe('idempotency keys on POST /api/todos', () => {
     });
     await post(cookie, 'buy eggs', 'takeover-key-00000001'); // takeover
 
-    const metrics = await ctx.app.inject({ url: '/metrics' });
+    const metrics = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
     expect(metrics.statusCode).toBe(200);
     for (const outcome of ['stored', 'replayed', 'conflict', 'takeover']) {
       expect(metrics.body, outcome).toMatch(

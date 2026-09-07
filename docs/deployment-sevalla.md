@@ -89,6 +89,7 @@ target.
 | `NODE_ENV`          | `production`                                            |
 | `TRUST_PROXY`       | `true` (requests arrive through Cloudflare)             |
 | `ALLOWED_ORIGINS`   | that environment's public URL — **required**, see below |
+| `METRICS_TOKEN`     | `openssl rand -base64 48` — **required**, see below     |
 | `PORT`              | `3000`                                                  |
 | `DATABASE_POOL_MAX` | see the note below                                      |
 
@@ -97,6 +98,14 @@ is deployed. An empty value disables the CSRF origin check, so the app refuses t
 start while serving the client without it: the container never becomes ready and
 Sevalla keeps the previous revision. See
 `docs/adr/0007-fail-closed-security-config.md`.
+
+`METRICS_TOKEN` guards `GET /metrics`, which is served on the same port as the
+API. Scrapers send `Authorization: Bearer <token>`; anything else gets a `401`.
+It must be set **before** a revision that requires it is deployed — under
+`NODE_ENV=production` the app refuses to boot when it is unset, the example
+value, or shorter than 32 characters, for the same reason as above: the counters
+there include password-reset outcomes, and an open `/metrics` turns them into a
+user-enumeration oracle. Use a different value per environment.
 
 **GitHub secrets:** `SEVALLA_TOKEN` (from app.sevalla.com/api-keys).
 

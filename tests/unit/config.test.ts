@@ -37,6 +37,36 @@ describe('loadConfig', () => {
     ).toThrow(/refusing to boot/);
   });
 
+  it('leaves METRICS_TOKEN empty outside production', () => {
+    expect(loadConfig(base).METRICS_TOKEN).toBe('');
+    expect(loadConfig({ ...base, NODE_ENV: 'test' }).METRICS_TOKEN).toBe('');
+  });
+
+  it('refuses to boot in production without a metrics token', () => {
+    expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow(/METRICS_TOKEN/);
+  });
+
+  it('refuses the example metrics token in production', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        METRICS_TOKEN: 'replace-me-with-openssl-rand-base64-48-output',
+      }),
+    ).toThrow(/METRICS_TOKEN/);
+  });
+
+  it('refuses a short metrics token in production', () => {
+    expect(() =>
+      loadConfig({ ...base, NODE_ENV: 'production', METRICS_TOKEN: 'too-short' }),
+    ).toThrow(/METRICS_TOKEN/);
+  });
+
+  it('accepts a strong metrics token in production', () => {
+    const config = loadConfig({ ...base, NODE_ENV: 'production', METRICS_TOKEN: 'm'.repeat(32) });
+    expect(config.METRICS_TOKEN).toBe('m'.repeat(32));
+  });
+
   it('parses the origin allowlist', () => {
     const config = loadConfig({ ...base, ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
     expect(allowedOrigins(config)).toEqual(['https://a.com', 'https://b.com']);

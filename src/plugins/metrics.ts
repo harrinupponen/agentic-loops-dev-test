@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import client from 'prom-client';
+import type { Config } from '../config.js';
+import { bearerToken, bearerTokenMatches } from '../lib/bearer-auth.js';
+import { unauthorized } from '../lib/errors.js';
 
-export function registerMetrics(app: FastifyInstance) {
+export function registerMetrics(app: FastifyInstance, config: Config) {
   const registry = new client.Registry();
   client.collectDefaultMetrics({ register: registry });
 
@@ -54,10 +57,33 @@ export function registerMetrics(app: FastifyInstance) {
     done();
   });
 
-  app.get('/metrics', { logLevel: 'warn', schema: { hide: true } }, async (_request, reply) => {
-    reply.header('content-type', registry.contentType);
-    return registry.metrics();
-  });
+  // A monitoring endpoint, not a user session: a bearer token compared in
+  // constant time, no cookie and no database round trip. An empty token means
+  // no scraper credential is configured, which loadConfig only tolerates
+  // outside production — see the comment there for why the endpoint is open on
+  // a developer machine and closed everywhere else.
+  const expectedToken = config.METRICS_TOKEN;
+  app.log.info({ metricsAuth: expectedToken ? 'required' : 'disabled' }, 'metrics endpoint ready');
+
+  app.get(
+    '/metrics',
+    {
+      logLevel: 'warn',
+      schema: { hide: true },
+      // onRequest: rejected before any metric is rendered or logged.
+      onRequest: (request, _reply, done) => {
+        if (!expectedToken) return done();
+        if (!bearerTokenMatches(bearerToken(request.headers.authorization), expectedToken)) {
+          return done(unauthorized('Metrics token required'));
+        }
+        done();
+      },
+    },
+    async (_request, reply) => {
+      reply.header('content-type', registry.contentType);
+      return registry.metrics();
+    },
+  );
 
   return { registry, idempotencyRequests, passwordResets, mailMessages };
 }

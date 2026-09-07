@@ -4,7 +4,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { passwordResetTokens } from '../../src/db/schema.js';
 import type { Mailer } from '../../src/lib/mailer.js';
 import { generateResetToken, hashResetToken } from '../../src/lib/reset-token.js';
-import { createTestContext, registerUser, resetDb, type TestContext } from './helpers.js';
+import {
+  createTestContext,
+  metricsAuth,
+  registerUser,
+  resetDb,
+  type TestContext,
+} from './helpers.js';
 
 interface SentMessage {
   to: string;
@@ -431,7 +437,7 @@ describe('password reset — operational surface', () => {
       });
       expect(confirm.statusCode).toBe(204);
 
-      const metrics = await dropped.app.inject({ url: '/metrics' });
+      const metrics = await dropped.app.inject({ url: '/metrics', headers: metricsAuth() });
       expect(metrics.body).toMatch(
         /mail_messages_total\{[^}]*transport="drop"[^}]*\}\s+([1-9]\d*)/,
       );
@@ -457,7 +463,7 @@ describe('password reset — operational surface', () => {
       .where(eq(passwordResetTokens.userId, user.id));
     await confirmReset({ token, password: NEW_PASSWORD }); // consumed
 
-    const metrics = await ctx.app.inject({ url: '/metrics' });
+    const metrics = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
     const body = metrics.body;
 
     expect(body).toContain('password_reset_total');
@@ -473,7 +479,7 @@ describe('password reset — operational surface', () => {
     await registerUser(ctx.app, 'counted@example.com');
 
     const read = async () => {
-      const res = await ctx.app.inject({ url: '/metrics' });
+      const res = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
       const match = /password_reset_total\{outcome="requested"\}\s+(\d+)/.exec(res.body);
       return match ? Number(match[1]) : 0;
     };

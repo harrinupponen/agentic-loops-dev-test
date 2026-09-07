@@ -19,6 +19,18 @@ export interface TestContext {
  */
 export const NO_WEB_CLIENT = 'tests/fixtures/no-web-client';
 
+/**
+ * The bearer token every test context serves `/metrics` behind. Not a secret:
+ * it exists so the suite exercises the authenticated path, which is the only
+ * one production runs (see loadConfig).
+ */
+export const TEST_METRICS_TOKEN = 'test-metrics-token-that-is-long-enough-x';
+
+/** Authorization header for `/metrics` under the default test context. */
+export const metricsAuth = (token = TEST_METRICS_TOKEN) => ({
+  authorization: `Bearer ${token}`,
+});
+
 export async function createTestContext(
   overrides: Record<string, string> = {},
   options: BuildOptions = {},
@@ -34,6 +46,7 @@ export async function createTestContext(
     // Never print a reset token during a test run; cases that need to read one
     // inject a fake mailer through BuildOptions instead (ADR 0010).
     MAIL_TRANSPORT: 'drop',
+    METRICS_TOKEN: TEST_METRICS_TOKEN,
     WEB_ROOT: NO_WEB_CLIENT,
     ...overrides,
   });

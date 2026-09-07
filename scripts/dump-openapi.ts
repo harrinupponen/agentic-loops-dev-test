@@ -27,6 +27,9 @@ const config: Config = {
   // `drop` rather than the `console` default: this script must never be the
   // thing that prints a token, and it sends no mail anyway.
   MAIL_TRANSPORT: 'drop',
+  // Empty is what a developer machine runs; `/metrics` is hidden from the
+  // contract either way, so the token state cannot affect this dump.
+  METRICS_TOKEN: '',
   TRUST_PROXY: false,
   ALLOWED_ORIGINS: '',
   // Deliberately a path with no client: the web routes are hidden from the

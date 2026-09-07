@@ -143,7 +143,7 @@ export async function buildApp(
   });
 
   registerErrorHandler(app);
-  const metrics = registerMetrics(app);
+  const metrics = registerMetrics(app, config);
 
   const origins = allowedOrigins(config);
   if (origins.length > 0) {

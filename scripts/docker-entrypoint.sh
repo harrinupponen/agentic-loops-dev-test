@@ -11,7 +11,18 @@ set -e
 # holds the old revision in place.
 
 echo "Running migrations..."
+# Deliberately without the --import below: migrations need no spans and should
+# not depend on the telemetry module loading at all.
 node dist/db/migrate.js
 
 echo "Starting server..."
-exec node dist/index.js
+# --import evaluates dist/telemetry.js before the application's module graph,
+# which is the only moment @opentelemetry/instrumentation-pg can patch `pg`:
+# ESM hoists imports, so nothing called from index.js is early enough. The path
+# is a literal shipped in the image and never read from the environment — a
+# module path from env would be an arbitrary-code-load primitive for anyone who
+# can set env on the app. With OTEL_EXPORTER_OTLP_ENDPOINT empty (every deployed
+# environment today) the module returns immediately. If dist/telemetry.js were
+# missing this crashloops and Sevalla holds the previous revision, which is why
+# `npm run verify:tracing` boots the built output.
+exec node --import ./dist/telemetry.js dist/index.js

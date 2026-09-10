@@ -38,6 +38,12 @@ const config: Config = {
   // src/routes/web.ts on a machine that has just run `npm run build`.
   WEB_ROOT: 'dist/no-web-client',
   SHUTDOWN_GRACE_MS: 0,
+  // Tracing changes no route schema, so the dump runs with it off — the same
+  // configuration every deployed environment runs (ADR 0012).
+  OTEL_EXPORTER_OTLP_ENDPOINT: '',
+  OTEL_EXPORTER_OTLP_HEADERS: '',
+  OTEL_SERVICE_NAME: 'agentic-todo',
+  TRACE_SAMPLE_RATIO: 0.1,
 };
 
 // The spec is derived from route schemas only; no query is ever executed.

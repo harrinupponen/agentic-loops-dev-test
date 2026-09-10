@@ -59,6 +59,19 @@ export const EnvSchema = z.object({
   /** Directory holding the built browser client (index.html plus app/). */
   WEB_ROOT: z.string().min(1).default('dist/public'),
   SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).default(10_000),
+
+  /**
+   * Base URL of an OTLP/HTTP collector, e.g. `http://localhost:4318`; the
+   * `/v1/traces` signal path is appended for you. Empty — the value in every
+   * deployed environment — means no SDK is constructed and no span is recorded
+   * (docs/adr/0012-traces-without-a-backend.md).
+   */
+  OTEL_EXPORTER_OTLP_ENDPOINT: z.string().default(''),
+  /** `k=v,k2=v2` sent on every export. A credential: never logged, never on a span. */
+  OTEL_EXPORTER_OTLP_HEADERS: z.string().default(''),
+  OTEL_SERVICE_NAME: z.string().min(1).default('agentic-todo'),
+  /** Head sampling ratio for root and remote-parent spans alike. */
+  TRACE_SAMPLE_RATIO: z.coerce.number().min(0).max(1).default(0.1),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
@@ -108,7 +121,63 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       throw new Error('METRICS_TOKEN must be at least 32 characters; refusing to boot.');
     }
   }
+  validateTracing(result.data);
   return result.data;
+}
+
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Three boot rules for the OTLP exporter, all ADR 0007 shaped: the process
+ * refuses to start rather than exporting a credential in clear, or staying
+ * silent because of a typo.
+ */
+function validateTracing(config: Config): void {
+  const endpoint = config.OTEL_EXPORTER_OTLP_ENDPOINT;
+
+  if (!endpoint) {
+    // Headers with nowhere to send them means somebody believes tracing is on
+    // when it is off — and a credential is sitting in an environment for
+    // nothing.
+    if (config.OTEL_EXPORTER_OTLP_HEADERS) {
+      throw new Error(
+        'OTEL_EXPORTER_OTLP_HEADERS is set while OTEL_EXPORTER_OTLP_ENDPOINT is empty, so ' +
+          'tracing is off and those headers are a credential nothing will ever use. Set the ' +
+          'endpoint or unset the headers.',
+      );
+    }
+    return;
+  }
+
+  let url: URL;
+  try {
+    url = new URL(endpoint);
+  } catch {
+    throw new Error(
+      `OTEL_EXPORTER_OTLP_ENDPOINT is not an absolute URL (got "${endpoint}"). Expected a ` +
+        'collector base URL such as http://localhost:4318.',
+    );
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error(
+      `OTEL_EXPORTER_OTLP_ENDPOINT must be an http(s) URL (got "${url.protocol}"). ` +
+        'This exporter speaks OTLP over HTTP.',
+    );
+  }
+
+  // Plaintext OTLP to anything but a sidecar puts OTEL_EXPORTER_OTLP_HEADERS —
+  // a credential — on the wire in clear, and spans are the one signal designed
+  // to leave the perimeter.
+  if (
+    config.NODE_ENV === 'production' &&
+    url.protocol === 'http:' &&
+    !LOOPBACK_HOSTS.has(url.hostname)
+  ) {
+    throw new Error(
+      'OTEL_EXPORTER_OTLP_ENDPOINT uses plaintext http:// to a non-loopback host under ' +
+        'NODE_ENV=production; refusing to boot. Use https://, or a collector on localhost.',
+    );
+  }
 }
 
 export function allowedOrigins(config: Config): string[] {

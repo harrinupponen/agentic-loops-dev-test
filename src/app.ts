@@ -1,3 +1,4 @@
+import { isSpanContextValid, trace } from '@opentelemetry/api';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
@@ -18,6 +19,7 @@ import { createSessionLoader } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
 import { registerMetrics } from './plugins/metrics.js';
+import { registerTracing } from './plugins/tracing.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerTodoRoutes } from './routes/todos.js';
@@ -59,6 +61,15 @@ export async function buildApp(
     logger: {
       level: config.LOG_LEVEL,
       ...(options.logStream ? { stream: options.logStream } : {}),
+      // One place, covering `app.log` and `request.log` alike: an operator
+      // holding a log line can pivot to the trace, and `app.request_id` on the
+      // span pivots back. Adds nothing when tracing is off — the API's no-op
+      // span reports an all-zero, invalid trace id.
+      mixin: () => {
+        const spanContext = trace.getActiveSpan()?.spanContext();
+        if (!spanContext || !isSpanContextValid(spanContext)) return {};
+        return { traceId: spanContext.traceId, spanId: spanContext.spanId };
+      },
       // Structured logs only. Never log cookies, auth headers, or request bodies.
       redact: {
         paths: ['req.headers.cookie', 'req.headers.authorization', 'res.headers["set-cookie"]'],
@@ -162,6 +173,10 @@ export async function buildApp(
   // Runs at onRequest, before body schema validation, so an unauthenticated
   // request is rejected before it reveals anything about the expected shape.
   app.addHook('onRequest', createSessionLoader(db));
+
+  // Immediately after the session loader, so the span covers the handler and
+  // every query it makes, and reads nothing from `request.user`.
+  registerTracing(app);
 
   const idempotency = registerIdempotency(app, db, config, metrics.idempotencyRequests);
 

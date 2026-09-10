@@ -1,0 +1,17 @@
+# A collector for a developer machine, never deployed: see
+# docs/adr/0012-traces-without-a-backend.md and docs/observability.md.
+#
+#   docker compose -f ops/docker-compose.observability.yml up
+#   OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318 TRACE_SAMPLE_RATIO=1.0 npm start
+#
+# Spans then appear in this container's log.
+services:
+  otel-collector:
+    image: otel/opentelemetry-collector:0.115.1
+    command: ['--config=/etc/otel-collector.yaml']
+    volumes:
+      - ./otel-collector.yaml:/etc/otel-collector.yaml:ro
+    ports:
+      # OTLP/HTTP only. This exporter speaks JSON over HTTP; no gRPC port is
+      # published, so there is one less listener on the developer's machine.
+      - '4318:4318'

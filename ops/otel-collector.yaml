@@ -1,0 +1,23 @@
+# Local development only. Nothing in docs/deployment-sevalla.md provisions a
+# collector, and F-008 deploys none: see docs/adr/0012-traces-without-a-backend.md.
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  # Prints every span it receives. No storage, no retention, no credentials —
+  # the point is to see that the pipeline works, not to keep anything.
+  debug:
+    verbosity: detailed
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

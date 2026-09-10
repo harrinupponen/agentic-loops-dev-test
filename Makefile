@@ -1,4 +1,4 @@
-.PHONY: setup dev db-up db-down migrate ci ci-fast test-unit test-integration e2e load clean
+.PHONY: setup dev db-up db-down migrate ci ci-fast test-unit test-integration e2e load verify-tracing clean
 
 setup:
 	npm ci
@@ -43,6 +43,13 @@ e2e:
 
 load:
 	k6 run load/smoke.js
+
+# Not a PR gate: needs a database and boots the built server. This is the only
+# check that the --import preload in scripts/docker-entrypoint.sh still patches
+# `pg` — no unit or integration test can see that.
+verify-tracing: db-up
+	npm run build
+	npm run verify:tracing
 
 clean:
 	rm -rf dist coverage .ci/reports playwright-report test-results

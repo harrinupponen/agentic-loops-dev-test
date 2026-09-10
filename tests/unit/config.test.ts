@@ -83,6 +83,77 @@ describe('loadConfig', () => {
     expect(config.METRICS_TOKEN).toBe('m'.repeat(32));
   });
 
+  it('leaves tracing off by default', () => {
+    const config = loadConfig(base);
+    expect(config.OTEL_EXPORTER_OTLP_ENDPOINT).toBe('');
+    expect(config.OTEL_EXPORTER_OTLP_HEADERS).toBe('');
+    expect(config.OTEL_SERVICE_NAME).toBe('agentic-todo');
+    expect(config.TRACE_SAMPLE_RATIO).toBe(0.1);
+  });
+
+  // OTEL_EXPORTER_OTLP_HEADERS is a credential; plaintext OTLP to anywhere but
+  // a sidecar puts it on the wire in clear (ADR 0007, ADR 0012).
+  it('refuses a plaintext OTLP endpoint to a remote host in production', () => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        METRICS_TOKEN: 'm'.repeat(32),
+        OTEL_EXPORTER_OTLP_ENDPOINT: 'http://collector.example.com:4318',
+      }),
+    ).toThrow(/OTEL_EXPORTER_OTLP_ENDPOINT/);
+  });
+
+  it('accepts a plaintext OTLP endpoint on loopback in production', () => {
+    for (const endpoint of ['http://localhost:4318', 'http://127.0.0.1:4318']) {
+      const config = loadConfig({
+        ...base,
+        NODE_ENV: 'production',
+        METRICS_TOKEN: 'm'.repeat(32),
+        OTEL_EXPORTER_OTLP_ENDPOINT: endpoint,
+      });
+      expect(config.OTEL_EXPORTER_OTLP_ENDPOINT).toBe(endpoint);
+    }
+  });
+
+  it('accepts an https OTLP endpoint to a remote host in production', () => {
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: 'production',
+      METRICS_TOKEN: 'm'.repeat(32),
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'https://collector.example.com',
+    });
+    expect(config.OTEL_EXPORTER_OTLP_ENDPOINT).toBe('https://collector.example.com');
+  });
+
+  // A typo here means silence, and silence is the failure mode the whole
+  // feature exists to remove — so it fails the boot in every NODE_ENV.
+  it('refuses an unparseable OTLP endpoint in any environment', () => {
+    for (const env of ['development', 'test', 'production'] as const) {
+      expect(() =>
+        loadConfig({
+          ...base,
+          NODE_ENV: env,
+          METRICS_TOKEN: 'm'.repeat(32),
+          OTEL_EXPORTER_OTLP_ENDPOINT: 'localhost:4318',
+        }),
+      ).toThrow(/OTEL_EXPORTER_OTLP_ENDPOINT/);
+    }
+  });
+
+  it('refuses OTLP headers with no endpoint to send them to', () => {
+    expect(() =>
+      loadConfig({ ...base, OTEL_EXPORTER_OTLP_HEADERS: 'authorization=Bearer nope' }),
+    ).toThrow(/OTEL_EXPORTER_OTLP_HEADERS/);
+  });
+
+  it('rejects a sample ratio outside 0 to 1', () => {
+    expect(() => loadConfig({ ...base, TRACE_SAMPLE_RATIO: '1.5' })).toThrow(/TRACE_SAMPLE_RATIO/);
+    expect(() => loadConfig({ ...base, TRACE_SAMPLE_RATIO: '-0.1' })).toThrow(/TRACE_SAMPLE_RATIO/);
+    expect(loadConfig({ ...base, TRACE_SAMPLE_RATIO: '1' }).TRACE_SAMPLE_RATIO).toBe(1);
+    expect(loadConfig({ ...base, TRACE_SAMPLE_RATIO: '0' }).TRACE_SAMPLE_RATIO).toBe(0);
+  });
+
   it('parses the origin allowlist', () => {
     const config = loadConfig({ ...base, ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
     expect(allowedOrigins(config)).toEqual(['https://a.com', 'https://b.com']);

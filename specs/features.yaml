@@ -80,7 +80,7 @@ features:
   - id: F-008
     title: OpenTelemetry traces
     spec: specs/features/F-008-observability.md
-    status: in-progress
+    status: done
     deps: [F-003]
     risk_tags: [infra, observability]
 

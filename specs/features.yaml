@@ -69,10 +69,18 @@ features:
     deps: [F-003]
     risk_tags: [reliability]
 
+  # Split during planning: "traces and RED dashboards" needed a place to send
+  # both, and nothing in docs/deployment-sevalla.md provisions one — no
+  # collector, no Prometheus, no vendor. F-008 keeps trace generation and export,
+  # shipped disabled (ADR 0012); the backend decision and the dashboards that
+  # need a datasource are F-019 at the bottom of this file. RED itself needs no
+  # new instrumentation: http_request_duration_seconds already carries rate,
+  # errors, and duration. Access control on /metrics is NOT here — METRICS_TOKEN
+  # shipped in F-004 by review decision.
   - id: F-008
-    title: OpenTelemetry traces and RED dashboards
+    title: OpenTelemetry traces
     spec: specs/features/F-008-observability.md
-    status: todo
+    status: spec
     deps: [F-003]
     risk_tags: [infra, observability]
 
@@ -156,3 +164,15 @@ features:
     status: todo
     deps: [F-004, F-005]
     risk_tags: [email, infra, security]
+
+  # Split out of F-008 (see the comment on it). Owns the one decision F-008
+  # refused to make for a human: where telemetry is stored, self-hosted or SaaS,
+  # and what it costs. Until this ships, nothing scrapes /metrics and
+  # OTEL_EXPORTER_OTLP_ENDPOINT is empty in every environment, so F-008's spans
+  # go nowhere. Plan this one only after F-008 has been reviewed.
+  - id: F-019
+    title: RED dashboards and a metrics backend
+    spec: specs/features/F-019-red-dashboards.md
+    status: todo
+    deps: [F-008]
+    risk_tags: [infra, observability, security]

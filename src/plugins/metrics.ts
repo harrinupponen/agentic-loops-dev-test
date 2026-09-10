@@ -3,10 +3,17 @@ import client from 'prom-client';
 import type { Config } from '../config.js';
 import { bearerToken, bearerTokenMatches } from '../lib/bearer-auth.js';
 import { unauthorized } from '../lib/errors.js';
+import { spansExported, tracingStatus } from '../telemetry.js';
 
 export function registerMetrics(app: FastifyInstance, config: Config) {
   const registry = new client.Registry();
   client.collectDefaultMetrics({ register: registry });
+
+  // Owned by src/telemetry.ts, which runs as a `--import` preload long before
+  // this registry exists — hence `registers: []` there and this line here. A
+  // rising `failed` while `succeeded` is flat means the collector is rejecting
+  // batches, which is otherwise only visible on stderr.
+  registry.registerMetric(spansExported);
 
   const httpDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
@@ -75,6 +82,18 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
   // a developer machine and closed everywhere else.
   const expectedToken = config.METRICS_TOKEN;
   app.log.info({ metricsAuth: expectedToken ? 'required' : 'disabled' }, 'metrics endpoint ready');
+
+  // Never the endpoint and never the headers — the latter is a credential.
+  // `pgInstrumented: false` with tracing enabled is the one misconfiguration
+  // that silently halves this feature's value; see ADR 0013.
+  const tracing = tracingStatus();
+  app.log.info(tracing, 'tracing ready');
+  if (tracing.tracing === 'enabled' && !tracing.pgInstrumented) {
+    app.log.warn(
+      'tracing started without the --import preload: server spans only, no postgres spans. ' +
+        'Start the server as `node --import ./dist/telemetry.js dist/index.js`.',
+    );
+  }
 
   app.get(
     '/metrics',

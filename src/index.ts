@@ -1,6 +1,9 @@
 import { loadConfig } from './config.js';
 import { createDb } from './db/client.js';
 import { buildApp } from './app.js';
+// Already evaluated by the `--import` preload; this import is the same module
+// instance, not a second start (ESM keys modules by resolved URL).
+import { shutdownTracing } from './telemetry.js';
 
 const config = loadConfig();
 const { pool, db } = createDb(config.DATABASE_URL, config.DATABASE_POOL_MAX);
@@ -23,6 +26,9 @@ async function shutdown(signal: string) {
   try {
     await app.close();
     await pool.end();
+    // After close, so the last request's span is in the batch; capped at two
+    // seconds so a hostile collector cannot hold the exit open.
+    await shutdownTracing();
     app.log.info('shutdown complete');
     process.exit(0);
   } catch (err) {

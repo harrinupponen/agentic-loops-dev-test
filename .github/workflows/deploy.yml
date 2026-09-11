@@ -3,6 +3,17 @@ name: Deploy
 on:
   push:
     branches: [main]
+    # Commits that touch only specs/docs/the test-baseline count have no
+    # effect on the running app, but without this filter they still queue a
+    # full deploy behind the required production approval — and since
+    # cancel-in-progress is false, one unapproved cosmetic deploy blocks
+    # every real one behind it.
+    paths-ignore:
+      - 'specs/**'
+      - 'docs/**'
+      - '.agents/**'
+      - '*.md'
+      - '.ci/test-baseline.json'
   workflow_dispatch:
 
 # Never run two deploys at once, and never cancel one midway.

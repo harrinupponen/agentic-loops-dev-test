@@ -65,6 +65,19 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // Incremented by the number of rows actually deleted, so `others` carries how
+  // wide each sweep was. A sustained rise in scope="others" across accounts is a
+  // population of users finding sessions they do not recognise — a
+  // credential-stuffing signal arriving through the front door rather than
+  // through the login error rate. No public id and no user agent as a label:
+  // one is an identifier, the other is attacker-controlled text.
+  const sessionsRevoked = new client.Counter({
+    name: 'sessions_revoked_total',
+    help: 'Sessions revoked by scope',
+    labelNames: ['scope'],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -115,7 +128,14 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     },
   );
 
-  return { registry, idempotencyRequests, passwordResets, emailVerifications, mailMessages };
+  return {
+    registry,
+    idempotencyRequests,
+    passwordResets,
+    emailVerifications,
+    mailMessages,
+    sessionsRevoked,
+  };
 }
 
 export type Metrics = ReturnType<typeof registerMetrics>;

@@ -7,7 +7,7 @@ import type { Database } from '../db/client.js';
 import { emailVerificationTokens, passwordResetTokens, sessions, users } from '../db/schema.js';
 import { AppError, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import type { Mailer } from '../lib/mailer.js';
-import { SESSION_COOKIE } from '../lib/session.js';
+import { SESSION_COOKIE, truncateUserAgent } from '../lib/session.js';
 import { hashPassword, verifyPassword } from '../lib/password.js';
 import {
   RecoveryTokenSchema,
@@ -154,7 +154,12 @@ export function registerAuthRoutes(
       // known mailbox at will by re-attempting a signup.
       if (!user) throw conflict('email_taken', 'An account with that email already exists');
 
-      const { token, expiresAt } = await createSession(db, user.id, config.SESSION_TTL_HOURS);
+      const { token, expiresAt } = await createSession(
+        db,
+        user.id,
+        config.SESSION_TTL_HOURS,
+        truncateUserAgent(request.headers['user-agent']),
+      );
       setSessionCookie(reply, config, token, expiresAt);
       await issueEmailVerification(request, user, 'issued');
       // A row this insert just created is unverified by construction.
@@ -187,7 +192,12 @@ export function registerAuthRoutes(
       const ok = await verifyPassword(digest, password);
       if (!user || !ok) throw unauthorized('Invalid email or password');
 
-      const { token, expiresAt } = await createSession(db, user.id, config.SESSION_TTL_HOURS);
+      const { token, expiresAt } = await createSession(
+        db,
+        user.id,
+        config.SESSION_TTL_HOURS,
+        truncateUserAgent(request.headers['user-agent']),
+      );
       setSessionCookie(reply, config, token, expiresAt);
       // Login is deliberately not gated on verification (ADR 0011); the state
       // is reported so a client can prompt, and nothing more.

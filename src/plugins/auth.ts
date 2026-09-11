@@ -6,11 +6,18 @@ import { sessions, users } from '../db/schema.js';
 import { unauthorized } from '../lib/errors.js';
 import { SESSION_COOKIE, generateSessionToken, hashSessionToken } from '../lib/session.js';
 
-export async function createSession(db: Database, userId: string, ttlHours: number) {
+export async function createSession(
+  db: Database,
+  userId: string,
+  ttlHours: number,
+  // Captured once, here, and never updated: a session belongs to the client
+  // that started it (ADR 0015). Callers pass truncateUserAgent(header).
+  userAgent: string | null,
+) {
   const token = generateSessionToken();
   const id = hashSessionToken(token);
   const expiresAt = new Date(Date.now() + ttlHours * 3_600_000);
-  await db.insert(sessions).values({ id, userId, expiresAt });
+  await db.insert(sessions).values({ id, userId, expiresAt, userAgent });
   return { token, expiresAt };
 }
 

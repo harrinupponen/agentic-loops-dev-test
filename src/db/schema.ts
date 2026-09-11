@@ -61,6 +61,12 @@ export const todos = pgTable(
     completed: boolean('completed').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    // NULL means live; a timestamp means the owner deleted it then. Nullable
+    // permanently — NULL is a value this design relies on, not a gap awaiting a
+    // backfill — so there is no contract migration, ever. Every read of this
+    // table must say which rows it means, in SQL, at the call site.
+    // See docs/adr/0016-soft-delete-is-a-nullable-timestamp.md.
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
   },
   (t) => [index('todos_user_id_created_at_idx').on(t.userId, t.createdAt)],
 );

@@ -27,10 +27,20 @@ export const sessions = pgTable(
   'sessions',
   {
     // sha256 of the opaque token; the raw token never touches the database.
+    // Two identifiers live on this row and the naming is deliberately not
+    // symmetric: `id` is the secret-derived one and never leaves the server,
+    // `public_id` is the one that appears in responses and URLs. See ADR 0014.
     id: text('id').primaryKey(),
+    // Nullable in the database until the contract migration; modelled as
+    // notNull because the 0005 default plus backfill means no code path can
+    // read or write a NULL.
+    publicId: uuid('public_id').notNull().defaultRandom(),
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // Attacker-controlled text, truncated at write time and never logged.
+    // NULL for a client that sent no header and for every pre-F-009 row.
+    userAgent: text('user_agent'),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

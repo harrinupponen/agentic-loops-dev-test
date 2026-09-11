@@ -22,6 +22,7 @@ import { registerMetrics } from './plugins/metrics.js';
 import { registerTracing } from './plugins/tracing.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
+import { registerSessionRoutes } from './routes/sessions.js';
 import { registerTodoRoutes } from './routes/todos.js';
 import { registerWebRoutes } from './routes/web.js';
 
@@ -30,6 +31,22 @@ declare module 'fastify' {
     isShuttingDown: boolean;
     config: Config;
   }
+}
+
+/**
+ * Routes whose path parameter must not reach a log line, keyed by route
+ * template. A session's public id identifies a credential-bearing row, and
+ * F-009 requires that no log line contains one at any level; the access log
+ * would otherwise print it as part of the request URL. The route template is
+ * still logged as `route`, so cardinality and debuggability are unchanged.
+ */
+const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
+
+function loggableUrl(url: string, route: string | undefined): string {
+  if (!route || !URL_PARAM_REDACTED.has(route)) return url;
+  // Replace the concrete value with the template's placeholder, keeping any
+  // query string off the line entirely.
+  return route;
 }
 
 export interface BuildOptions {
@@ -78,7 +95,7 @@ export async function buildApp(
       serializers: {
         req: (req) => ({
           method: req.method,
-          url: req.url,
+          url: loggableUrl(req.url, req.routeOptions?.url),
           route: req.routeOptions?.url,
           remoteAddress: req.ip,
         }),
@@ -182,6 +199,8 @@ export async function buildApp(
 
   registerHealthRoutes(app, db);
   registerAuthRoutes(app, db, config, mailer, metrics);
+  // Under the existing `auth` tag, so the tag list above is unchanged.
+  registerSessionRoutes(app, db, config, metrics);
   registerTodoRoutes(app, db, idempotency);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.
   await registerWebRoutes(app, config);

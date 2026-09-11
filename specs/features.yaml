@@ -93,7 +93,7 @@ features:
   - id: F-009
     title: Session management — list and revoke active sessions
     spec: specs/features/F-009-session-management.md
-    status: spec
+    status: in-progress
     deps: [F-002]
     risk_tags: [auth, security, pii, migration]
 

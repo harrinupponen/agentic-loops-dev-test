@@ -97,12 +97,20 @@ features:
     deps: [F-002]
     risk_tags: [auth, security, pii, migration]
 
+  # Split during planning: the API is F-010, the browser affordances are F-021 at
+  # the bottom of this file — the same cut F-004/F-017 and F-009/F-020 made.
+  # F-016's delete button keeps working unchanged, but nothing in the browser can
+  # restore a todo until F-021 ships. `pii` added by this plan: no new personal
+  # data is collected, but content a user asked to delete is now retained for 30
+  # days, which is a privacy posture and not an implementation detail. One
+  # additive migration, nullable `todos.deleted_at`, with NO contract step —
+  # NULL is the permanent meaning of "live". See the spec and ADR 0016/0017.
   - id: F-010
     title: Soft delete and restore for todos
     spec: specs/features/F-010-soft-delete.md
-    status: todo
+    status: spec
     deps: [F-003]
-    risk_tags: [migration]
+    risk_tags: [migration, pii]
 
   - id: F-011
     title: Distributed rate limiting backed by Redis
@@ -195,3 +203,17 @@ features:
     status: todo
     deps: [F-009, F-006]
     risk_tags: [frontend, auth, security]
+
+  # Split out of F-010 (see the comment on it). F-010 makes a deleted todo
+  # recoverable for 30 days but ships no way for a browser to recover one, so
+  # F-016's delete button keeps looking permanent while the row survives. Owns
+  # the undo affordance, the trash view over `?deleted=true`, and the browser
+  # journey. Plan this one only after F-010 has been reviewed. It carries one
+  # constraint from F-010: a restored todo returns at its ORIGINAL created_at,
+  # possibly behind a cursor the list has already passed.
+  - id: F-021
+    title: Web UI — undo delete and trash view
+    spec: specs/features/F-021-web-undo-delete.md
+    status: todo
+    deps: [F-010, F-016]
+    risk_tags: [frontend]

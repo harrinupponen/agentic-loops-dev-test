@@ -84,12 +84,18 @@ features:
     deps: [F-003]
     risk_tags: [infra, observability]
 
+  # Split during planning: F-006 put "log out everywhere (F-009)" out of scope and
+  # pointed here, so the screen has been waiting on this API. F-009 is the API
+  # only — the screen is F-020 at the bottom of this file, the same cut F-004/F-017
+  # made. Adds two nullable columns to `sessions` (a public id that is not derived
+  # from the token, per ADR 0014, and the device string, per ADR 0015); the
+  # `SET NOT NULL` contract migration ships alone in a later PR.
   - id: F-009
     title: Session management — list and revoke active sessions
     spec: specs/features/F-009-session-management.md
-    status: todo
+    status: spec
     deps: [F-002]
-    risk_tags: [auth, security]
+    risk_tags: [auth, security, pii, migration]
 
   - id: F-010
     title: Soft delete and restore for todos
@@ -176,3 +182,16 @@ features:
     status: todo
     deps: [F-008]
     risk_tags: [infra, observability, security]
+
+  # Split out of F-009 (see the comment on it). F-006 deferred "log out
+  # everywhere" to F-009; F-009 builds the API and this builds the screen and owns
+  # the browser journey. Plan this one only after F-009 has been reviewed, so it
+  # inherits whatever the human changed. It carries one hard constraint from
+  # F-009: the stored user agent is attacker-controlled text and must be rendered
+  # with textContent, never innerHTML.
+  - id: F-020
+    title: Web UI — session management screen
+    spec: specs/features/F-020-web-session-management.md
+    status: todo
+    deps: [F-009, F-006]
+    risk_tags: [frontend, auth, security]

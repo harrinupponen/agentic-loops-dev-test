@@ -155,12 +155,30 @@ features:
     deps: [F-011]
     risk_tags: [infra, performance, pii]
 
+  # Split during planning: the API is F-013, the browser search box is F-023 at
+  # the bottom of this file — the same cut F-004/F-017, F-009/F-020 and
+  # F-010/F-021 made. F-016's list screen keeps working unchanged and gains no
+  # search input here, so until F-023 ships nothing in the browser can search.
+  # `migration` REMOVED by this plan, and that is the line to reject on: the
+  # design adds no column, no index and no migration at all. The text match is an
+  # in-query tsvector expression over the existing todos_user_id_created_at_idx,
+  # because every search is already scoped to one account and the GIN index that
+  # would be the textbook answer is blocked by issue #11 (as it was for F-010).
+  # ADR 0023 carries the exact index statement and the metric threshold that
+  # would justify adding it later, with no application change. The other decision
+  # worth reading is ADR 0022: search is a FILTER, not a ranking — results are
+  # ordered created_at DESC and page through the existing keyset cursor, because
+  # ts_rank is not a value a keyset cursor can be built from and OFFSET is
+  # forbidden (ADR 0002). F-010's open question is answered: `q` composes with
+  # the existing `deleted` parameter, so the trash is searchable exactly when the
+  # caller asks for it, and never otherwise. Search responses deliberately bypass
+  # F-012's cache in both directions.
   - id: F-013
     title: Full-text search over todo titles
     spec: specs/features/F-013-search.md
-    status: todo
+    status: spec
     deps: [F-003]
-    risk_tags: [performance, migration]
+    risk_tags: [performance]
 
   - id: F-014
     title: Audit log for security-relevant events
@@ -264,3 +282,20 @@ features:
     status: todo
     deps: [F-011]
     risk_tags: [infra, security]
+
+  # Split out of F-013 (see the comment on it). F-013 makes todos findable by
+  # title but ships no way for a browser to ask, so F-016's list screen still
+  # offers nothing but scrolling. Owns the search input, the empty-result state,
+  # and the browser journey. Plan this one only after F-013 has been reviewed. It
+  # carries three constraints from F-013: results are newest first and NOT
+  # relevance-ranked (ADR 0022), so the screen must not imply ranking; matching is
+  # whole-word after stemming, so `gro` does not match `groceries` and a
+  # search-as-you-type box returns nothing until a whole word is typed; and a
+  # query of only stop words legitimately matches nothing, which the copy must
+  # survive without claiming the search broke.
+  - id: F-023
+    title: Web UI — search the todo list
+    spec: specs/features/F-023-web-search.md
+    status: todo
+    deps: [F-013, F-016]
+    risk_tags: [frontend]

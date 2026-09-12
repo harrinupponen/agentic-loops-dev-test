@@ -108,7 +108,7 @@ features:
   - id: F-010
     title: Soft delete and restore for todos
     spec: specs/features/F-010-soft-delete.md
-    status: in-progress
+    status: done
     deps: [F-003]
     risk_tags: [migration, pii]
 

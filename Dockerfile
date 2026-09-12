@@ -22,6 +22,14 @@ RUN npm ci --omit=dev
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
+# The base tag is floating, not pinned by digest despite the comment above —
+# each build can land on a Debian snapshot where a specific OS package has a
+# fix available upstream but not yet baked into that snapshot. Upgrade only
+# the flagged package(s) rather than `apt-get upgrade -y`: a blanket upgrade
+# pulled in a much newer package set and made the scan far worse (2 HIGH/0
+# CRITICAL -> 52 HIGH/4 CRITICAL, including an unfixed CRITICAL in zlib1g) —
+# verified locally with `trivy image` before settling on this narrower fix.
+RUN apt-get update && apt-get install -y --only-upgrade libpcre2-8-0 && rm -rf /var/lib/apt/lists/*
 RUN groupadd -r app && useradd -r -g app app
 # The entrypoint below only ever calls `node`, never npm/npx — but the base
 # image ships them anyway, and their own bundled dependencies (not ours) are

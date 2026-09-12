@@ -186,6 +186,37 @@ describe('loadConfig', () => {
     expect(config.REDIS_URL).toBe('');
   });
 
+  // The cache claims a capability that does not exist without a store, and the
+  // failure it would otherwise produce is silence — so this is a boot failure in
+  // every NODE_ENV, the same "set and wrong" rule REDIS_URL already carries.
+  it('refuses TODO_LIST_CACHE_ENABLED=true with an empty REDIS_URL', () => {
+    expect(() => loadConfig({ ...base, TODO_LIST_CACHE_ENABLED: 'true' })).toThrow(
+      /TODO_LIST_CACHE_ENABLED/,
+    );
+    expect(
+      loadConfig({ ...base, TODO_LIST_CACHE_ENABLED: 'true', REDIS_URL: 'redis://localhost:6379' })
+        .TODO_LIST_CACHE_ENABLED,
+    ).toBe(true);
+  });
+
+  it('rejects a TODO_LIST_CACHE_TTL_SECONDS outside 1..300', () => {
+    expect(() => loadConfig({ ...base, TODO_LIST_CACHE_TTL_SECONDS: '0' })).toThrow(
+      /TODO_LIST_CACHE_TTL_SECONDS/,
+    );
+    expect(() => loadConfig({ ...base, TODO_LIST_CACHE_TTL_SECONDS: '301' })).toThrow(
+      /TODO_LIST_CACHE_TTL_SECONDS/,
+    );
+    expect(loadConfig(base).TODO_LIST_CACHE_TTL_SECONDS).toBe(30);
+  });
+
+  // Off is the default and an absent cache is not even a degraded state: it is
+  // the current, tested behaviour of the endpoint (ADR 0021).
+  it('accepts the cache defaults under NODE_ENV=production', () => {
+    const config = loadConfig({ ...base, NODE_ENV: 'production', METRICS_TOKEN: 'm'.repeat(32) });
+    expect(config.TODO_LIST_CACHE_ENABLED).toBe(false);
+    expect(config.TODO_LIST_CACHE_TTL_SECONDS).toBe(30);
+  });
+
   it('parses the origin allowlist', () => {
     const config = loadConfig({ ...base, ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
     expect(allowedOrigins(config)).toEqual(['https://a.com', 'https://b.com']);

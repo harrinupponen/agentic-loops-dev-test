@@ -1,9 +1,13 @@
 import type { FastifyBaseLogger } from 'fastify';
 import type Redis from 'ioredis';
-import { createHmac } from 'node:crypto';
 import client from 'prom-client';
 import type { Config } from '../config.js';
-import { redisTarget } from './redis.js';
+import { hashIdentity, redisTarget, withTimeout } from './redis.js';
+
+// Both live in ./redis.js so the cache and the limiter share one derivation and
+// one timeout, rather than growing a second copy each. Re-exported because this
+// is where callers have always imported hashIdentity from.
+export { hashIdentity };
 
 /**
  * The single signal that says whether the limiter is distributed right now.
@@ -50,17 +54,6 @@ const LUA = `
 /** Cleared wholesale beyond this: the fallback must not become the outage. */
 const MAX_LOCAL_ENTRIES = 10_000;
 
-/**
- * Keyed, not plain: an unsalted SHA-256 of an IPv4 address is reversible by
- * brute force in seconds, and the point is that the shared store holds no raw
- * address and no user id. COOKIE_SECRET is already required, already at least
- * 32 characters, and already per-environment, so staging and production cannot
- * collide even if they are ever pointed at one Redis by mistake.
- */
-export function hashIdentity(secret: string, identity: string): string {
-  return createHmac('sha256', secret).update(identity).digest('hex').slice(0, 32);
-}
-
 export interface RateLimitResult {
   current: number;
   ttl: number;
@@ -92,18 +85,6 @@ interface LocalEntry {
 }
 
 type StoreConfig = Pick<Config, 'REDIS_URL' | 'REDIS_TIMEOUT_MS' | 'COOKIE_SECRET'>;
-
-/** A hung command is a failed command as far as a request is concerned. */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  let timer: NodeJS.Timeout | undefined;
-  return Promise.race([
-    promise,
-    new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => reject(new Error('redis command timed out')), ms);
-      timer.unref();
-    }),
-  ]).finally(() => clearTimeout(timer));
-}
 
 /**
  * The @fastify/rate-limit store that counts in Redis and, when Redis cannot

@@ -87,6 +87,26 @@ export const EnvSchema = z.object({
    * sick-but-reachable Redis cannot become request latency.
    */
   REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(1000).default(50),
+
+  /**
+   * Master switch for the read-through cache in front of `GET /api/todos`.
+   * `false` — the default, and the value in every deployed environment — means
+   * no cache client is constructed and the list handler is byte-for-byte the
+   * code that ran before F-012 (docs/adr/0021-an-unreachable-cache-is-a-cache-miss.md).
+   *
+   * A switch of its own rather than riding on REDIS_URL, so the rollback for a
+   * misbehaving cache is not "unset REDIS_URL", which would also switch off
+   * F-011's distributed rate limiting.
+   */
+  TODO_LIST_CACHE_ENABLED: boolish.default(false),
+  /**
+   * Expiry on the per-user hash. A backstop for the two windows invalidation
+   * cannot close — a DEL against an unreachable Redis, and a process that
+   * commits a write and dies before issuing one — not the freshness mechanism
+   * (docs/adr/0020-a-cache-invalidates-a-user-not-a-page.md). It also bounds how
+   * long user content lives outside Postgres.
+   */
+  TODO_LIST_CACHE_TTL_SECONDS: z.coerce.number().int().min(1).max(300).default(30),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
@@ -153,6 +173,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
  * per instance forever, which is the failure this feature exists to remove.
  */
 function validateRedis(config: Config): void {
+  // Same "set and wrong" rule, applied to the cache: a switch turned on without
+  // a store claims a capability that does not exist, and the failure it would
+  // otherwise produce is silence. Deliberately NOT a rule requiring the cache in
+  // production — an absent cache removes nothing (ADR 0021).
+  if (config.TODO_LIST_CACHE_ENABLED && !config.REDIS_URL) {
+    throw new Error(
+      'TODO_LIST_CACHE_ENABLED is true while REDIS_URL is empty, so there is no store to ' +
+        'cache in. Set REDIS_URL, or leave the cache off.',
+    );
+  }
+
   if (!config.REDIS_URL) return;
 
   let url: URL;

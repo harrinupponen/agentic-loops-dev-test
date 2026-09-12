@@ -151,7 +151,7 @@ features:
   - id: F-012
     title: Read-through cache for the todo list endpoint
     spec: specs/features/F-012-caching.md
-    status: spec
+    status: in-progress
     deps: [F-011]
     risk_tags: [infra, performance, pii]
 

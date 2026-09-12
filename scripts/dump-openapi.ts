@@ -49,6 +49,10 @@ const config: Config = {
   // limiter changes no route schema either way.
   REDIS_URL: '',
   REDIS_TIMEOUT_MS: 50,
+  // Off, like every deployed environment: the cache changes no route schema, no
+  // status code, and no response body, so openapi.json is identical either way.
+  TODO_LIST_CACHE_ENABLED: false,
+  TODO_LIST_CACHE_TTL_SECONDS: 30,
 };
 
 // The spec is derived from route schemas only; no query is ever executed.

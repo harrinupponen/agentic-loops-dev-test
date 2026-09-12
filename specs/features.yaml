@@ -112,13 +112,30 @@ features:
     deps: [F-003]
     risk_tags: [migration, pii]
 
+  # Split during planning: "distributed" is a claim about shared state, and there
+  # is no shared store — docs/deployment-sevalla.md provisions two Postgres
+  # databases and nothing else. Sevalla does offer managed redis/valkey (checked,
+  # not assumed), but buying two always-on instances is a human's decision, so
+  # F-011 ships the Redis-backed store selected by REDIS_URL, empty in every
+  # environment (ADR 0018) — the same cut F-008/F-019 made at the datasource.
+  # Provisioning and enabling is F-022 at the bottom of this file. Unlike F-008,
+  # the empty value is not a gap: the in-memory limiter keeps running exactly as
+  # it does today, which is why no boot rule requires REDIS_URL in production.
+  # The other decision worth reading is ADR 0019: an unreachable Redis degrades to
+  # a per-instance count rather than failing open or closed. No migration.
   - id: F-011
     title: Distributed rate limiting backed by Redis
     spec: specs/features/F-011-distributed-rate-limit.md
-    status: todo
+    status: spec
     deps: [F-003]
     risk_tags: [infra, security]
 
+  # NOTE from F-011's planning, for a human to decide rather than an agent: this
+  # feature will want the same Redis, and a read-through cache pointed at nothing
+  # is as dark as F-011's limiter is. Its deps are deliberately left at [F-011]
+  # rather than rewired to include F-022 — rewiring another feature's schedule
+  # inside a spec PR about rate limiting is the scope creep this repo reviews for.
+  # If F-012 should wait for a real Redis, add F-022 here.
   - id: F-012
     title: Read-through cache for the todo list endpoint
     spec: specs/features/F-012-caching.md
@@ -217,3 +234,21 @@ features:
     status: todo
     deps: [F-010, F-016]
     risk_tags: [frontend]
+
+  # Split out of F-011 (see the comment on it). Owns the one decision F-011
+  # refused to make for a human: whether this project buys a shared datastore,
+  # which one, at what size, and in which environments. Until this ships,
+  # REDIS_URL is empty everywhere and F-011's limiter counts per instance exactly
+  # as it does today. Plan this one only after F-011 has been reviewed. It carries
+  # two constraints from F-011: `agentic-todo-staging` has RATE_LIMIT_MAX and
+  # AUTH_RATE_LIMIT_MAX overridden to 100000 as Sevalla env vars so the Playwright
+  # suite can run, so distributed limiting will appear to do nothing on staging
+  # until that is reconciled; and the first enablement is a real behaviour change
+  # for users behind shared NAT, whose budget stops being multiplied by the
+  # instance count. See ADR 0018.
+  - id: F-022
+    title: Provision shared Redis and enable the distributed limiter
+    spec: specs/features/F-022-provision-redis.md
+    status: todo
+    deps: [F-011]
+    risk_tags: [infra, security]

@@ -56,11 +56,23 @@ declare module 'fastify' {
  */
 const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
 
+/**
+ * Routes whose query string must not reach a log line, keyed by route template.
+ * F-013 puts user-typed text in `?q=` on the todo list: it says what someone was
+ * looking for, which is the same category of content as a todo title and
+ * sometimes more revealing, and F-013 requires that no log line produced by a
+ * search contains it. The path is still logged, and the search itself logs its
+ * outcome and row count structurally, so nothing an operator needs is lost.
+ */
+const URL_QUERY_REDACTED = new Set(['/api/todos']);
+
 function loggableUrl(url: string, route: string | undefined): string {
-  if (!route || !URL_PARAM_REDACTED.has(route)) return url;
+  if (!route) return url;
   // Replace the concrete value with the template's placeholder, keeping any
   // query string off the line entirely.
-  return route;
+  if (URL_PARAM_REDACTED.has(route)) return route;
+  if (URL_QUERY_REDACTED.has(route)) return url.split('?')[0] ?? route;
+  return url;
 }
 
 export interface BuildOptions {

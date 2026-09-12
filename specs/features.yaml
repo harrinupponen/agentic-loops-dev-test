@@ -176,7 +176,7 @@ features:
   - id: F-013
     title: Full-text search over todo titles
     spec: specs/features/F-013-search.md
-    status: spec
+    status: in-progress
     deps: [F-003]
     risk_tags: [performance]
 

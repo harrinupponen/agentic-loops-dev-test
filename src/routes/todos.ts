@@ -87,13 +87,19 @@ const ListQuery = z.object({
     .enum(['true', 'false'])
     .default('false')
     .transform((v) => v === 'true'),
+  // Full-text search over the title. A filter like every other field here, not
+  // a mode: absent means the list behaves exactly as it did before F-013.
+  // Bounded at both ends before the handler sees it — empty after trim is a
+  // 400 rather than a filter that matches everything, and 100 characters caps
+  // what reaches plainto_tsquery.
+  q: z.string().trim().min(1).max(100).optional(),
 });
 
 export function registerTodoRoutes(
   app: FastifyInstance,
   db: Database,
   idempotency: preHandlerAsyncHookHandler,
-  metrics: Pick<Metrics, 'todosSoftDeleted'>,
+  metrics: Pick<Metrics, 'todosSoftDeleted' | 'todoSearches' | 'todoSearchDuration'>,
   /** null whenever either switch is off, which short-circuits every call site. */
   cache: TodoListCache | null = null,
 ) {
@@ -110,14 +116,20 @@ export function registerTodoRoutes(
       },
     },
     async (request) => {
-      const { limit, cursor, completed, deleted } = request.query;
+      const { limit, cursor, completed, deleted, q } = request.query;
       const userId = request.user!.id;
 
       // Only cursor-less requests are cached: a cursor's cardinality is the
       // user's row count, so caching one buys hit rate on the pages that are
       // requested least (ADR 0020). With no cache configured this is `false` at
       // every call site below and the executed path is the pre-F-012 one.
-      const cacheable = cache !== null && cursor === undefined;
+      // A search is never cached in either direction: the field name is
+      // `v1:{live|trash}:{any|done|open}:{limit}` and has no `q` dimension, so a
+      // search response stored under it would serve this user's next plain list
+      // a result truncated to whatever they last searched for. `q` is free text
+      // besides, and the hash is capped at 16 fields (ADR 0020), so caching
+      // searches would evict the one variant that actually repeats.
+      const cacheable = cache !== null && cursor === undefined && q === undefined;
       const variant = { deleted, completed, limit };
       if (cacheable) {
         const hit = await cache.get(userId, variant);
@@ -133,17 +145,45 @@ export function registerTodoRoutes(
       ];
       if (cursor) conditions.push(lt(todos.createdAt, cursor));
       if (completed !== undefined) conditions.push(eq(todos.completed, completed));
+      // One more condition in the same array, so search composes with the
+      // account scope, the trash filter, `completed` and the cursor rather than
+      // replacing any of them. The configuration is named rather than defaulted,
+      // because the one-argument to_tsvector reads a per-database GUC that can
+      // differ between environments; `plainto_tsquery` rather than `to_tsquery`,
+      // because the function reading user text must have no syntax to raise on;
+      // and `${q}` is bound as a parameter by Drizzle's sql template, never
+      // concatenated. This expression is character for character the one the
+      // future GIN index will use (ADR 0023).
+      if (q !== undefined) {
+        conditions.push(
+          sql`to_tsvector('english', ${todos.title}) @@ plainto_tsquery('english', ${q})`,
+        );
+      }
 
+      // Timed only when it is a search: the histogram must measure the query
+      // this feature added and nothing else (ADR 0023).
+      const stopTimer = q === undefined ? undefined : metrics.todoSearchDuration.startTimer();
       const rows = await db
         .select()
         .from(todos)
         .where(and(...conditions))
         .orderBy(desc(todos.createdAt))
         .limit(limit + 1);
+      stopTimer?.();
 
       const items = rows.slice(0, limit);
       const nextCursor = rows.length > limit ? (items.at(-1)?.createdAt ?? null) : null;
       const body = { items, nextCursor };
+
+      if (q !== undefined) {
+        const outcome = items.length > 0 ? 'match' : 'empty';
+        metrics.todoSearches.inc({ outcome }, 1);
+        // The outcome and the row count, never the query and never a title: what
+        // someone searched for is user content, and often more revealing than
+        // what they wrote down.
+        request.log.info({ search: { outcome, count: items.length } }, 'todo search');
+      }
+
       // Awaited, not fired and forgotten: worst case it adds REDIS_TIMEOUT_MS to
       // a path that has already paid for a Postgres query.
       if (cacheable) await cache.set(userId, variant, body);

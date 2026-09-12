@@ -48,6 +48,10 @@ export async function createTestContext(
     MAIL_TRANSPORT: 'drop',
     METRICS_TOKEN: TEST_METRICS_TOKEN,
     WEB_ROOT: NO_WEB_CLIENT,
+    // The default everywhere, deployed or not: the plugin's own LocalStore and
+    // no Redis client at all. Cases that want the shared store pass the
+    // throwaway container's URL (TEST_REDIS_URL) as an override.
+    REDIS_URL: '',
     ...overrides,
   });
 

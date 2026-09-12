@@ -72,6 +72,21 @@ export const EnvSchema = z.object({
   OTEL_SERVICE_NAME: z.string().min(1).default('agentic-todo'),
   /** Head sampling ratio for root and remote-parent spans alike. */
   TRACE_SAMPLE_RATIO: z.coerce.number().min(0).max(1).default(0.1),
+
+  /**
+   * `redis://` or `rediss://` connection URL for the shared rate-limit counter.
+   * Empty — the value in every deployed environment — means no client is
+   * constructed and the limiter keeps the plugin's own per-instance store, at
+   * exactly today's strength (docs/adr/0018-a-shared-limiter-needs-a-store-nobody-has-bought.md).
+   * A CREDENTIAL: it carries a password, so it is never logged.
+   */
+  REDIS_URL: z.string().default(''),
+  /**
+   * Per-command budget. A command that does not answer inside it is a store
+   * failure and the request falls back to the local window (ADR 0019), so a
+   * sick-but-reachable Redis cannot become request latency.
+   */
+  REDIS_TIMEOUT_MS: z.coerce.number().int().min(1).max(1000).default(50),
 });
 
 export type Config = z.infer<typeof EnvSchema>;
@@ -122,7 +137,39 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     }
   }
   validateTracing(result.data);
+  validateRedis(result.data);
   return result.data;
+}
+
+/**
+ * Two boot rules, and deliberately no third one requiring REDIS_URL in
+ * production: an empty value removes no control, it leaves the per-instance
+ * limiter running exactly as it does today, and the boot log line says which
+ * store is live. That is the narrow, argued departure from ADR 0007 — see
+ * docs/adr/0018-a-shared-limiter-needs-a-store-nobody-has-bought.md.
+ *
+ * A value that is set and wrong is a different matter and fails the boot in
+ * every NODE_ENV: a typo would otherwise leave the limiter silently counting
+ * per instance forever, which is the failure this feature exists to remove.
+ */
+function validateRedis(config: Config): void {
+  if (!config.REDIS_URL) return;
+
+  let url: URL;
+  try {
+    url = new URL(config.REDIS_URL);
+  } catch {
+    // Never echoes the value: it carries a password.
+    throw new Error(
+      'REDIS_URL is not an absolute URL. Expected a connection URL such as ' + 'redis://host:6379.',
+    );
+  }
+  if (url.protocol !== 'redis:' && url.protocol !== 'rediss:') {
+    throw new Error(
+      `REDIS_URL must use the redis: or rediss: scheme (got "${url.protocol}"). ` +
+        'A connection string for another datastore would be retried in a loop forever.',
+    );
+  }
 }
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);

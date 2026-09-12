@@ -15,5 +15,20 @@ services:
       timeout: 3s
       retries: 20
 
+  # Optional locally, and unset in every deployed environment (ADR 0018): with
+  # no REDIS_URL the limiter keeps its per-instance store. No volume and no
+  # append-only file — a rate-limit keyspace is disposable by construction, and
+  # a restart resetting the counters is exactly today's behaviour.
+  redis:
+    image: redis:7-alpine
+    command: ['redis-server', '--appendonly', 'no', '--maxmemory-policy', 'volatile-lru']
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 volumes:
   pgdata:

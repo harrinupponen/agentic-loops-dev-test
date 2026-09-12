@@ -1,10 +1,11 @@
 import { isSpanContextValid, trace } from '@opentelemetry/api';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
-import rateLimit from '@fastify/rate-limit';
+import rateLimit, { type FastifyRateLimitStoreCtor } from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import underPressure from '@fastify/under-pressure';
 import Fastify, { type FastifyInstance } from 'fastify';
+import type Redis from 'ioredis';
 import {
   jsonSchemaTransform,
   serializerCompiler,
@@ -15,6 +16,8 @@ import { allowedOrigins, type Config } from './config.js';
 import type { Database } from './db/client.js';
 import { forbidden } from './lib/errors.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
+import { createRateLimitStore } from './lib/rate-limit-store.js';
+import { createRedis } from './lib/redis.js';
 import { createSessionLoader } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
@@ -30,6 +33,8 @@ declare module 'fastify' {
   interface FastifyInstance {
     isShuttingDown: boolean;
     config: Config;
+    /** The shared store, or null when REDIS_URL is empty. See src/lib/redis.ts. */
+    redis: Redis | null;
   }
 }
 
@@ -106,6 +111,25 @@ export async function buildApp(
   app.decorate('isShuttingDown', false);
   app.decorate('config', config);
 
+  // null when REDIS_URL is empty, which is every deployed environment today: no
+  // client is constructed, no `store` is passed below, and the executed path is
+  // the one already running in production (ADR 0018).
+  const redis = createRedis(config, { keyPrefix: 'rl:', log: app.log });
+  app.decorate('redis', redis);
+  if (redis) {
+    app.addHook('onClose', async () => {
+      try {
+        await redis.quit();
+      } catch {
+        // Never connected, or the connection is already gone.
+      } finally {
+        // Idempotent, and the only thing that makes the socket's death
+        // synchronous with app.close() rather than a tick after it.
+        redis.disconnect();
+      }
+    });
+  }
+
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
@@ -140,8 +164,22 @@ export async function buildApp(
     global: true,
     max: config.RATE_LIMIT_MAX,
     timeWindow: config.RATE_LIMIT_WINDOW,
-    // In-memory store is per-instance. Swap for the Redis store once you run
-    // more than one machine and the limit needs to be global (see specs F-011).
+    // With no Redis the plugin builds its own per-instance LocalStore, exactly
+    // as it did before F-011. With one, the store below counts in Redis and
+    // falls back to a local window when it cannot (ADR 0019). The identity is
+    // hashed inside the store, so the key generator is unchanged.
+    ...(redis
+      ? {
+          // The shipped types omit the timeWindow and max arguments the plugin
+          // actually passes to `incr` (see store/RedisStore.js), so the cast is
+          // the library's, not ours.
+          store: createRateLimitStore(
+            redis,
+            config,
+            app.log,
+          ) as unknown as FastifyRateLimitStoreCtor,
+        }
+      : {}),
     keyGenerator: (request) => request.user?.id ?? request.ip,
     // @fastify/rate-limit throws whatever this returns and relies on the
     // global error handler to read statusCode/code/message off it — see

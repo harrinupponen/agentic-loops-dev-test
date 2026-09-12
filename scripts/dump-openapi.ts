@@ -44,6 +44,11 @@ const config: Config = {
   OTEL_EXPORTER_OTLP_HEADERS: '',
   OTEL_SERVICE_NAME: 'agentic-todo',
   TRACE_SAMPLE_RATIO: 0.1,
+  // No shared store, so no client is built and no connection is attempted —
+  // the same configuration every deployed environment runs (ADR 0018), and the
+  // limiter changes no route schema either way.
+  REDIS_URL: '',
+  REDIS_TIMEOUT_MS: 50,
 };
 
 // The spec is derived from route schemas only; no query is ever executed.

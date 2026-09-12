@@ -130,18 +130,30 @@ features:
     deps: [F-003]
     risk_tags: [infra, security]
 
-  # NOTE from F-011's planning, for a human to decide rather than an agent: this
-  # feature will want the same Redis, and a read-through cache pointed at nothing
-  # is as dark as F-011's limiter is. Its deps are deliberately left at [F-011]
-  # rather than rewired to include F-022 — rewiring another feature's schedule
-  # inside a spec PR about rate limiting is the scope creep this repo reviews for.
-  # If F-012 should wait for a real Redis, add F-022 here.
+  # F-011's planning left a question here for a human: should this wait for F-022
+  # and a real Redis? Answered during F-012's planning, in the spec's "Key
+  # decisions", and the answer is no — deps stay [F-011]. Invalidation
+  # correctness is provable against the throwaway Redis the integration suite
+  # already starts, and blocking implementation on a purchase serialises work for
+  # no engineering benefit. Reject the spec on that line if you disagree.
+  # Ships inert twice over: REDIS_URL is empty everywhere (ADR 0018) and the new
+  # TODO_LIST_CACHE_ENABLED defaults to false, so it will still do nothing on the
+  # day F-022 lands. That second switch is deliberate — otherwise the only
+  # rollback for a stale list would be unsetting REDIS_URL, which would also
+  # switch off F-011's distributed limiter. Enabling it is a rollout step with a
+  # watch list in the spec, not a follow-up feature. `pii` added by this plan: no
+  # new personal data is collected, but todo titles — user content — live outside
+  # Postgres for the first time, for up to 30 seconds. No migration. The two
+  # decisions worth reading are ADR 0020 (any write discards that user's whole
+  # cache; nothing is surgical) and ADR 0021 (an unreachable cache is a miss, and
+  # there is deliberately no per-instance fallback — for a cache, unlike a
+  # limiter, per-instance state is wrong rather than merely weaker).
   - id: F-012
     title: Read-through cache for the todo list endpoint
     spec: specs/features/F-012-caching.md
-    status: todo
+    status: spec
     deps: [F-011]
-    risk_tags: [infra, performance]
+    risk_tags: [infra, performance, pii]
 
   - id: F-013
     title: Full-text search over todo titles

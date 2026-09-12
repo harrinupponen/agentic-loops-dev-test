@@ -78,6 +78,21 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // `restored` climbing relative to `deleted` is the feature earning its keep:
+  // users misclick delete, which is the premise of the whole thing. `purged`
+  // flat at zero more than 30 days after launch means the sweep never runs and
+  // the retention window is fiction — nothing else in the system says so, and
+  // `deleted` climbing while `purged` stays near zero is the accumulation the
+  // no-scheduler choice accepts (ADR 0017). `purged` advances by the number of
+  // rows actually removed, so it carries how wide each sweep was. No todo id and
+  // no title as a label: one is unbounded cardinality, the other is user content.
+  const todosSoftDeleted = new client.Counter({
+    name: 'todos_soft_delete_total',
+    help: 'Todo soft delete lifecycle events by action',
+    labelNames: ['action'],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -135,6 +150,7 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     emailVerifications,
     mailMessages,
     sessionsRevoked,
+    todosSoftDeleted,
   };
 }
 

@@ -201,7 +201,7 @@ export async function buildApp(
   registerAuthRoutes(app, db, config, mailer, metrics);
   // Under the existing `auth` tag, so the tag list above is unchanged.
   registerSessionRoutes(app, db, config, metrics);
-  registerTodoRoutes(app, db, idempotency);
+  registerTodoRoutes(app, db, idempotency, metrics);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.
   await registerWebRoutes(app, config);
 

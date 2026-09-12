@@ -932,6 +932,16 @@
             "in": "query",
             "name": "deleted",
             "required": false
+          },
+          {
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "in": "query",
+            "name": "q",
+            "required": false
           }
         ],
         "responses": {

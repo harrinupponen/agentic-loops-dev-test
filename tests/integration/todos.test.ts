@@ -577,3 +577,308 @@ describe('todos · soft delete', () => {
     }
   });
 });
+
+// --- F-013 full-text search --------------------------------------------------
+
+describe('todos · search', () => {
+  it('search returns only matching todos', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-happy@example.com');
+    await createTodo(cookie, 'call the plumber');
+    await createTodo(cookie, 'plumber invoice');
+    await createTodo(cookie, 'buy milk');
+
+    const { items, nextCursor } = await listTodos(cookie, '?q=plumber');
+    expect(items.map((t) => t.title).sort()).toEqual(['call the plumber', 'plumber invoice']);
+    expect(nextCursor).toBeNull();
+  });
+
+  it('search matches stemmed words', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-stem@example.com');
+    await createTodo(cookie, 'buying milk');
+    await createTodo(cookie, 'call plumber');
+
+    // 'buying' stems to 'buy' under the english configuration, so the word the
+    // user retypes from memory finds the todo they actually wrote.
+    expect((await listTodos(cookie, '?q=buy')).items.map((t) => t.title)).toEqual(['buying milk']);
+    expect((await listTodos(cookie, '?q=milk')).items.map((t) => t.title)).toEqual(['buying milk']);
+    expect((await listTodos(cookie, '?q=buy')).items.map((t) => t.title)).not.toContain(
+      'call plumber',
+    );
+  });
+
+  it('search does not match prefixes', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-prefix@example.com');
+    await createTodo(cookie, 'groceries');
+
+    // Whole words after stemming only: no `to_tsquery(... || ':*')` anywhere.
+    expect((await listTodos(cookie, '?q=gro')).items).toEqual([]);
+    expect((await listTodos(cookie, '?q=groceries')).items.map((t) => t.title)).toEqual([
+      'groceries',
+    ]);
+  });
+
+  it('a search with no matches is an empty page', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-empty@example.com');
+    await createTodo(cookie, 'buy milk');
+
+    const res = await ctx.app.inject({ url: '/api/todos?q=submarine', headers: { cookie } });
+    expect(res.statusCode).toBe(200); // not a 404
+    expect(res.json<{ items: TodoView[]; nextCursor: string | null }>()).toEqual({
+      items: [],
+      nextCursor: null,
+    });
+  });
+
+  it('a stop-word-only query matches nothing', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-stopword@example.com');
+    await createTodo(cookie, 'the quick fox');
+    await createTodo(cookie, 'another todo');
+
+    // An empty tsquery matches nothing. The failure mode this guards against is
+    // it degrading into "no filter" and returning the caller's whole list.
+    const { items, nextCursor } = await listTodos(cookie, '?q=the');
+    expect(items).toEqual([]);
+    expect(nextCursor).toBeNull();
+  });
+
+  it('search rejects an empty or oversized query', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-validation@example.com');
+    await createTodo(cookie, 'anything');
+
+    for (const query of ['?q=', '?q=%20', `?q=${'x'.repeat(101)}`]) {
+      const res = await ctx.app.inject({ url: `/api/todos${query}`, headers: { cookie } });
+      expect(res.statusCode, query).toBe(400);
+      expect(res.json<{ error: { code: string } }>().error.code).toBe('validation_failed');
+    }
+
+    // The boundary itself is accepted, so the bound is 100 and not 99.
+    const ok = await ctx.app.inject({
+      url: `/api/todos?q=${'x'.repeat(100)}`,
+      headers: { cookie },
+    });
+    expect(ok.statusCode).toBe(200);
+  });
+
+  it('search survives tsquery operator characters', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-operators@example.com');
+    await createTodo(cookie, 'plumber and electrician');
+    await createTodo(cookie, 'unrelated errand');
+
+    // plainto_tsquery has no syntax to inject; to_tsquery would raise on these
+    // and turn user input into a 500.
+    for (const q of ['a & b | c :* !', "' OR 1=1 --", '<->', '!!!', 'plumber & electrician']) {
+      const res = await ctx.app.inject({
+        url: `/api/todos?q=${encodeURIComponent(q)}`,
+        headers: { cookie },
+      });
+      expect(res.statusCode, q).toBe(200);
+    }
+
+    // The one that is a real search once the operators are read as words.
+    const { items } = await listTodos(cookie, `?q=${encodeURIComponent('plumber & electrician')}`);
+    expect(items.map((t) => t.title)).toEqual(['plumber and electrician']);
+  });
+
+  it('search respects the deleted filter in both directions', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-deleted@example.com');
+    const live = await createTodo(cookie, 'milk for the live list');
+    const trashed = await createTodo(cookie, 'milk for the trash');
+    // Non-matching rows in both views, so neither assertion can pass by the
+    // view filter alone.
+    const otherLive = await createTodo(cookie, 'call the plumber');
+    const otherTrashed = await createTodo(cookie, 'plumber invoice');
+    for (const id of [trashed.id, otherTrashed.id]) {
+      expect((await softDelete(cookie, id)).statusCode).toBe(204);
+    }
+    expect(otherLive.id).toBeTruthy();
+
+    const liveResult = await listTodos(cookie, '?q=milk');
+    expect(liveResult.items.map((t) => t.id)).toEqual([live.id]);
+
+    const trashResult = await listTodos(cookie, '?q=milk&deleted=true');
+    expect(trashResult.items.map((t) => t.id)).toEqual([trashed.id]);
+    expect(trashResult.items[0]!.deletedAt).not.toBeNull();
+    // Never a mix, in either direction.
+    expect(trashResult.items.map((t) => t.id)).not.toContain(live.id);
+  });
+
+  it('search composes with the completed filter', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-completed@example.com');
+    const done = await createTodo(cookie, 'plumber visit one');
+    const open = await createTodo(cookie, 'plumber visit two');
+    // One completed and one open row that do not match, so `completed` alone
+    // cannot produce these answers.
+    const otherDone = await createTodo(cookie, 'buy milk');
+    await createTodo(cookie, 'buy bread');
+    for (const id of [done.id, otherDone.id]) {
+      await ctx.app.inject({
+        method: 'PATCH',
+        url: `/api/todos/${id}`,
+        headers: { cookie },
+        payload: { completed: true },
+      });
+    }
+
+    expect((await listTodos(cookie, '?q=plumber&completed=true')).items.map((t) => t.id)).toEqual([
+      done.id,
+    ]);
+    expect((await listTodos(cookie, '?q=plumber&completed=false')).items.map((t) => t.id)).toEqual([
+      open.id,
+    ]);
+    expect((await listTodos(cookie, '?q=plumber')).items.map((t) => t.id).sort()).toEqual(
+      [done.id, open.id].sort(),
+    );
+  });
+
+  it('search paginates by the same keyset cursor', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-paging@example.com');
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      ids.push((await createTodo(cookie, `plumber ${i}`)).id);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    // Noise that must never appear on either page.
+    await createTodo(cookie, 'unrelated errand');
+
+    const page1 = await listTodos(cookie, '?q=plumber&limit=2');
+    expect(page1.items).toHaveLength(2);
+    expect(page1.nextCursor).toBeTruthy();
+
+    const page2 = await listTodos(
+      cookie,
+      `?q=plumber&limit=2&cursor=${encodeURIComponent(page1.nextCursor!)}`,
+    );
+    expect(page2.items).toHaveLength(1);
+    expect(page2.nextCursor).toBeNull();
+
+    const seen = [...page1.items, ...page2.items].map((t) => t.id);
+    expect(new Set(seen).size).toBe(3);
+    expect(seen.sort()).toEqual([...ids].sort());
+  });
+
+  it('search returns newest first', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-order@example.com');
+    const titles = ['plumber first', 'plumber second', 'plumber third'];
+    for (const title of titles) {
+      await createTodo(cookie, title);
+      // Interleaved non-matching rows, so the order below is the order of the
+      // matches and not simply the order of the list.
+      await createTodo(cookie, 'unrelated errand');
+      await new Promise((r) => setTimeout(r, 2));
+    }
+
+    // created_at DESC, not relevance: ADR 0022.
+    const { items } = await listTodos(cookie, '?q=plumber');
+    expect(items.map((t) => t.title)).toEqual([...titles].reverse());
+  });
+
+  it('search never crosses accounts', async () => {
+    const alice = await registerUser(ctx.app, 'alice-search@example.com');
+    const bob = await registerUser(ctx.app, 'bob-search@example.com');
+    // Overlapping titles on purpose: the only thing separating these rows is
+    // `user_id` in the WHERE clause.
+    const aliceLive = await createTodo(alice.cookie, 'plumber for alice');
+    const aliceTrashed = await createTodo(alice.cookie, 'plumber alice deleted');
+    await createTodo(alice.cookie, 'alice buys milk');
+    expect((await softDelete(alice.cookie, aliceTrashed.id)).statusCode).toBe(204);
+    const bobLive = await createTodo(bob.cookie, 'plumber for bob');
+    const bobTrashed = await createTodo(bob.cookie, 'plumber bob deleted');
+    await createTodo(bob.cookie, 'bob buys milk');
+    expect((await softDelete(bob.cookie, bobTrashed.id)).statusCode).toBe(204);
+
+    const bobSearch = await listTodos(bob.cookie, '?q=plumber');
+    expect(bobSearch.items.map((t) => t.id)).toEqual([bobLive.id]);
+
+    const bobTrash = await listTodos(bob.cookie, '?q=plumber&deleted=true');
+    expect(bobTrash.items.map((t) => t.id)).toEqual([bobTrashed.id]);
+
+    // And the same from Alice's side, so neither account is merely empty.
+    const aliceSearch = await listTodos(alice.cookie, '?q=plumber');
+    expect(aliceSearch.items.map((t) => t.id)).toEqual([aliceLive.id]);
+    const aliceTrash = await listTodos(alice.cookie, '?q=plumber&deleted=true');
+    expect(aliceTrash.items.map((t) => t.id)).toEqual([aliceTrashed.id]);
+
+    // A user with no matching rows of their own gets an empty page, never an
+    // existence oracle for someone else's todos.
+    const carol = await registerUser(ctx.app, 'carol-search@example.com');
+    expect((await listTodos(carol.cookie, '?q=plumber')).items).toEqual([]);
+    expect((await listTodos(carol.cookie, '?q=plumber&deleted=true')).items).toEqual([]);
+  });
+
+  it('search requires authentication', async () => {
+    const res = await ctx.app.inject({ url: '/api/todos?q=plumber' });
+    expect(res.statusCode).toBe(401);
+    expect(res.json<{ error: { code: string } }>().error.code).toBe('unauthorized');
+  });
+
+  it('exposes search counters', async () => {
+    const { cookie } = await registerUser(ctx.app, 'search-counters@example.com');
+    await createTodo(cookie, 'plumber counter');
+
+    const read = async () => {
+      const res = await ctx.app.inject({ url: '/metrics', headers: metricsAuth() });
+      const value = (outcome: string) =>
+        Number(
+          new RegExp(`todo_search_total\\{outcome="${outcome}"\\}\\s+(\\d+)`).exec(res.body)?.[1] ??
+            0,
+        );
+      return { body: res.body, match: value('match'), empty: value('empty') };
+    };
+
+    const before = await read();
+    await listTodos(cookie, '?q=plumber');
+    await listTodos(cookie, '?q=submarine');
+    // A plain list must not move either counter.
+    await listTodos(cookie);
+    const after = await read();
+
+    expect(after.body).toContain('todo_search_total');
+    expect(after.body).toContain('todo_search_duration_seconds');
+    expect(after.match).toBe(before.match + 1);
+    expect(after.empty).toBe(before.empty + 1);
+  });
+
+  it('search queries are never logged', async () => {
+    const chunks: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(String(chunk));
+        cb();
+      },
+    });
+    const logged = await createTestContext(
+      { LOG_LEVEL: 'trace', AUTH_RATE_LIMIT_MAX: '10000' },
+      { logStream },
+    );
+    try {
+      await resetDb(logged.db);
+      const { cookie } = await registerUser(logged.app, 'logscan-search@example.com');
+      const title = 'SuperSecretSearchableTitle';
+      await logged.app.inject({
+        method: 'POST',
+        url: '/api/todos',
+        headers: { cookie },
+        payload: { title },
+      });
+
+      // A search that matches and one that does not: both log an outcome and a
+      // count, and neither may write down what was searched for.
+      const miss = 'UnfindableNeedleWord';
+      for (const q of [title, miss]) {
+        const res = await logged.app.inject({
+          url: `/api/todos?q=${encodeURIComponent(q)}`,
+          headers: { cookie },
+        });
+        expect(res.statusCode).toBe(200);
+      }
+
+      const output = chunks.join('');
+      expect(output.length).toBeGreaterThan(0); // the stream really is capturing
+      expect(output).toContain('todo search'); // the search really did log
+      expect(output).not.toContain(title);
+      expect(output).not.toContain(miss);
+    } finally {
+      await logged.close();
+    }
+  });
+});

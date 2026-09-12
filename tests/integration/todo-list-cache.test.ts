@@ -352,7 +352,7 @@ describe('todo list cache', () => {
     expect((await list(cookie, '?deleted=true')).json<{ items: unknown[] }>().items).toEqual([]);
   });
 
-  it('a failed write does not invalidate', async () => {
+  it("another user's failed write against my todo does not invalidate my cache", async () => {
     const owner = await user('owner');
     const stranger = await user('stranger');
     const todo = await createTodo(owner.cookie, 'mine');
@@ -373,6 +373,24 @@ describe('todo list cache', () => {
       'mine',
     ]);
     expect(queries.count()).toBe(0);
+  });
+
+  it("the caller's own failed write does not invalidate", async () => {
+    const owner = await user('own-fail');
+    await createTodo(owner.cookie, 'mine');
+    await list(owner.cookie);
+    queries.reset();
+
+    const missing = await ctx.app.inject({
+      method: 'PATCH',
+      url: '/api/todos/33333333-3333-4333-8333-333333333333',
+      headers: { cookie: owner.cookie },
+      payload: { title: 'nope' },
+    });
+    expect(missing.statusCode).toBe(404);
+
+    expect((await list(owner.cookie)).statusCode).toBe(200);
+    expect(queries.count()).toBe(0); // still a hit: a write that changed nothing discards nothing
   });
 
   it('invalidation is scoped to one user', async () => {

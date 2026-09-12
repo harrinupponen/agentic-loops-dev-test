@@ -94,6 +94,11 @@ target.
 | `DATABASE_POOL_MAX` | see the note below                                      |
 | `REDIS_URL`         | **leave unset** — nothing is provisioned, see below     |
 
+| Variable                      | Value                                            |
+| ----------------------------- | ------------------------------------------------ |
+| `TODO_LIST_CACHE_ENABLED`     | **leave unset** — defaults to `false`, see below |
+| `TODO_LIST_CACHE_TTL_SECONDS` | **leave unset** — defaults to `30`               |
+
 `ALLOWED_ORIGINS` must be set **before** a revision that ships the browser client
 is deployed. An empty value disables the CSRF origin check, so the app refuses to
 start while serving the client without it: the container never becomes ready and
@@ -130,6 +135,23 @@ Redis is deliberately **not** part of `/readyz`: an unreachable store degrades
 the limiter to a per-instance count rather than failing requests, and failing
 readiness would take every instance out of rotation at once
 (`docs/adr/0019-a-rate-limiter-degrades-rather-than-fails.md`).
+
+`TODO_LIST_CACHE_ENABLED` selects the read-through cache in front of
+`GET /api/todos`, and **the cache is off in every environment**. It needs a
+`REDIS_URL` as well, so it is off twice over today; setting it to `true` without
+one refuses the boot rather than pretending to cache. Unset is the correct value
+and cannot fail a deploy: with the cache off the list handler is byte-for-byte
+the code that ran before it existed. Confirm after a deploy by finding the `todo
+list cache ready` line and checking it reads `todoListCache: off`. Turning it on
+— after F-022 provisions Redis, on staging first, watching the hit ratio and
+`todo_list_cache_operations_total{operation="invalidate",outcome="error"}` — is
+the rollout section of `specs/features/F-012-caching.md`. It is a separate switch
+from `REDIS_URL` on purpose: the rollback for a stale list must not be the thing
+that also switches off distributed rate limiting.
+`TODO_LIST_CACHE_TTL_SECONDS` (1..300) bounds how long todo titles — user
+content — live outside Postgres. See
+`docs/adr/0020-a-cache-invalidates-a-user-not-a-page.md` and
+`docs/adr/0021-an-unreachable-cache-is-a-cache-miss.md`.
 
 **GitHub secrets:** `SEVALLA_TOKEN` (from app.sevalla.com/api-keys).
 

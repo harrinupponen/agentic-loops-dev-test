@@ -1,5 +1,6 @@
 import Redis from 'ioredis';
 import type { FastifyBaseLogger } from 'fastify';
+import { createHmac } from 'node:crypto';
 import type { Config } from '../config.js';
 
 export interface CreateRedisOptions {
@@ -11,6 +12,32 @@ export interface CreateRedisOptions {
   keyPrefix?: string;
   /** Connection errors are logged with `{ host, port }` — never the URL. */
   log?: Pick<FastifyBaseLogger, 'warn'>;
+}
+
+/**
+ * Keyed, not plain: an unsalted SHA-256 of an IPv4 address is reversible by
+ * brute force in seconds, and the point is that the shared store holds no raw
+ * address and no user id. COOKIE_SECRET is already required, already at least
+ * 32 characters, and already per-environment, so staging and production cannot
+ * collide even if they are ever pointed at one Redis by mistake.
+ *
+ * Shared by every feature that puts a key in Redis — the rate limiter and the
+ * todo list cache — so the keyspace has one derivation, not two.
+ */
+export function hashIdentity(secret: string, identity: string): string {
+  return createHmac('sha256', secret).update(identity).digest('hex').slice(0, 32);
+}
+
+/** A hung command is a failed command as far as a request is concerned. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    promise,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('redis command timed out')), ms);
+      timer.unref();
+    }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 /** Host and port, which are safe to log; the URL carries a password and is not. */

@@ -4,6 +4,7 @@ import type { Config } from '../config.js';
 import { bearerToken, bearerTokenMatches } from '../lib/bearer-auth.js';
 import { unauthorized } from '../lib/errors.js';
 import { rateLimitStoreOperations } from '../lib/rate-limit-store.js';
+import { todoListCacheOperations } from '../lib/todo-list-cache.js';
 import { spansExported, tracingStatus } from '../telemetry.js';
 
 export function registerMetrics(app: FastifyInstance, config: Config) {
@@ -20,6 +21,10 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
   // constructed before this registry exists, because the limiter is registered
   // before the metrics plugin is.
   registry.registerMetric(rateLimitStoreOperations);
+
+  // Owned by src/lib/todo-list-cache.ts, for the same reason: the cache is
+  // constructed from buildApp, not from here.
+  registry.registerMetric(todoListCacheOperations);
 
   const httpDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
@@ -140,6 +145,17 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
       authMax: config.AUTH_RATE_LIMIT_MAX,
     },
     'rate limiter ready',
+  );
+
+  // "Is the cache on right now" has to be answerable from the logs too: it is
+  // off by default, dark twice over, and this is the first thing to check after
+  // the rollout flip. Never the URL.
+  app.log.info(
+    {
+      todoListCache: config.TODO_LIST_CACHE_ENABLED && config.REDIS_URL ? 'redis' : 'off',
+      ttlSeconds: config.TODO_LIST_CACHE_TTL_SECONDS,
+    },
+    'todo list cache ready',
   );
 
   app.get(

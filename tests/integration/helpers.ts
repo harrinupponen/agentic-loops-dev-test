@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { FastifyInstance } from 'fastify';
+import type pg from 'pg';
 import { buildApp, type BuildOptions } from '../../src/app.js';
 import { loadConfig, type Config } from '../../src/config.js';
 import { createDb, type Database } from '../../src/db/client.js';
@@ -7,6 +8,8 @@ import { createDb, type Database } from '../../src/db/client.js';
 export interface TestContext {
   app: FastifyInstance;
   db: Database;
+  /** The app's own pool, so a test can count the queries a request makes. */
+  pool: pg.Pool;
   config: Config;
   close: () => Promise<void>;
 }
@@ -68,6 +71,7 @@ export async function createTestContext(
   return {
     app,
     db,
+    pool,
     config,
     close: async () => {
       await app.close();

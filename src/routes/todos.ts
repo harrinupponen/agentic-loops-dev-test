@@ -6,8 +6,18 @@ import type { Database } from '../db/client.js';
 import { todos } from '../db/schema.js';
 import { notFound } from '../lib/errors.js';
 import { IdempotencyKeySchema } from '../lib/idempotency.js';
+import type { TodoListCache } from '../lib/todo-list-cache.js';
 import { requireAuth } from '../plugins/auth.js';
 import type { Metrics } from '../plugins/metrics.js';
+
+/**
+ * OBLIGATION FOR ANYONE ADDING A WRITE HANDLER HERE: every successful write to a
+ * user's todos must `await cache?.invalidate(userId)` before it responds. It is
+ * an explicit call in each handler rather than an onResponse hook, so a reviewer
+ * reading one handler can see what it does to the cache (ADR 0020). The cost is
+ * that a new handler can forget, which is why there is one integration case per
+ * mutating route.
+ */
 
 /**
  * How long a soft-deleted todo stays recoverable. A constant, not configuration:
@@ -33,6 +43,18 @@ const TodoView = z.object({
   // null for every live todo. Additive, so existing clients are unaffected.
   deletedAt: z.coerce.date().nullable(),
 });
+
+/**
+ * The list response, exported because the cache re-validates a stored entry
+ * against this exact schema before serving it: an entry written by a previous
+ * release is a miss rather than a shape the OpenAPI contract does not describe.
+ */
+export const TodoListResponse = z.object({
+  items: z.array(TodoView),
+  nextCursor: z.coerce.date().nullable(),
+});
+
+export type TodoListBody = z.infer<typeof TodoListResponse>;
 
 const IdParam = z.object({ id: z.string().uuid() });
 
@@ -72,6 +94,8 @@ export function registerTodoRoutes(
   db: Database,
   idempotency: preHandlerAsyncHookHandler,
   metrics: Pick<Metrics, 'todosSoftDeleted'>,
+  /** null whenever either switch is off, which short-circuits every call site. */
+  cache: TodoListCache | null = null,
 ) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
@@ -82,14 +106,23 @@ export function registerTodoRoutes(
       schema: {
         tags: ['todos'],
         querystring: ListQuery,
-        response: {
-          200: z.object({ items: z.array(TodoView), nextCursor: z.coerce.date().nullable() }),
-        },
+        response: { 200: TodoListResponse },
       },
     },
     async (request) => {
       const { limit, cursor, completed, deleted } = request.query;
       const userId = request.user!.id;
+
+      // Only cursor-less requests are cached: a cursor's cardinality is the
+      // user's row count, so caching one buys hit rate on the pages that are
+      // requested least (ADR 0020). With no cache configured this is `false` at
+      // every call site below and the executed path is the pre-F-012 one.
+      const cacheable = cache !== null && cursor === undefined;
+      const variant = { deleted, completed, limit };
+      if (cacheable) {
+        const hit = await cache.get(userId, variant);
+        if (hit) return hit;
+      }
 
       // In the WHERE, never a .filter() on the rows that come back: the handler
       // fetches limit + 1 rows already filtered, so pages stay full and
@@ -110,7 +143,11 @@ export function registerTodoRoutes(
 
       const items = rows.slice(0, limit);
       const nextCursor = rows.length > limit ? (items.at(-1)?.createdAt ?? null) : null;
-      return { items, nextCursor };
+      const body = { items, nextCursor };
+      // Awaited, not fired and forgotten: worst case it adds REDIS_TIMEOUT_MS to
+      // a path that has already paid for a Postgres query.
+      if (cacheable) await cache.set(userId, variant, body);
+      return body;
     },
   );
 
@@ -132,6 +169,7 @@ export function registerTodoRoutes(
         .insert(todos)
         .values({ userId: request.user!.id, title: request.body.title })
         .returning();
+      await cache?.invalidate(request.user!.id);
       return reply.status(201).send(created[0]!);
     },
   );
@@ -194,7 +232,10 @@ export function registerTodoRoutes(
           ),
         )
         .returning();
+      // After the 404 check: a failed write invalidates nothing, because it
+      // changed nothing.
       if (!updated[0]) throw notFound('Todo not found');
+      await cache?.invalidate(request.user!.id);
       return updated[0];
     },
   );
@@ -247,6 +288,9 @@ export function registerTodoRoutes(
         request.log.warn({ err, todo: { outcome: 'sweep_failed' } }, 'todo retention sweep');
       }
 
+      // After the sweep, so one DEL covers both the row this request deleted and
+      // the rows the sweep removed from this user's trash view.
+      await cache?.invalidate(userId);
       return reply.status(204).send(null);
     },
   );
@@ -271,6 +315,10 @@ export function registerTodoRoutes(
 
       metrics.todosSoftDeleted.inc({ action: 'restored' }, 1);
       request.log.info({ todo: { action: 'restore' } }, 'todo restored');
+      // Covers both the live list and the trash: the row reappears mid-ordering
+      // at its original created_at, which is exactly the case whole-user
+      // invalidation handles for free (ADR 0020).
+      await cache?.invalidate(request.user!.id);
       // The full row, so the client can place it back at its original position
       // without a refetch (ADR 0008) — it returns at its original created_at.
       return restored[0];

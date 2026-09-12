@@ -18,6 +18,7 @@ import { forbidden } from './lib/errors.js';
 import { createMailer, type Mailer } from './lib/mailer.js';
 import { createRateLimitStore } from './lib/rate-limit-store.js';
 import { createRedis } from './lib/redis.js';
+import { createTodoListCache } from './lib/todo-list-cache.js';
 import { createSessionLoader } from './plugins/auth.js';
 import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
@@ -35,6 +36,14 @@ declare module 'fastify' {
     config: Config;
     /** The shared store, or null when REDIS_URL is empty. See src/lib/redis.ts. */
     redis: Redis | null;
+    /**
+     * The list cache's own client, or null unless REDIS_URL is set AND
+     * TODO_LIST_CACHE_ENABLED is true. Separate from `redis` so a cache command
+     * never queues on the socket the rate limiter — a security control on the
+     * hot path — is using, and so the two keyspaces stay under their own
+     * prefixes.
+     */
+    cacheRedis: Redis | null;
   }
 }
 
@@ -114,21 +123,33 @@ export async function buildApp(
   // null when REDIS_URL is empty, which is every deployed environment today: no
   // client is constructed, no `store` is passed below, and the executed path is
   // the one already running in production (ADR 0018).
-  const redis = createRedis(config, { keyPrefix: 'rl:', log: app.log });
-  app.decorate('redis', redis);
-  if (redis) {
+  const closeWithApp = (client: Redis) => {
     app.addHook('onClose', async () => {
       try {
-        await redis.quit();
+        await client.quit();
       } catch {
         // Never connected, or the connection is already gone.
       } finally {
         // Idempotent, and the only thing that makes the socket's death
         // synchronous with app.close() rather than a tick after it.
-        redis.disconnect();
+        client.disconnect();
       }
     });
-  }
+  };
+
+  const redis = createRedis(config, { keyPrefix: 'rl:', log: app.log });
+  app.decorate('redis', redis);
+  if (redis) closeWithApp(redis);
+
+  // Off unless both switches are on, which is every deployed environment today:
+  // no second client, `todoListCache` is null, every call site in the todo
+  // routes short-circuits, and the executed path is byte-for-byte the one that
+  // ran before F-012 (ADR 0021).
+  const cacheRedis = config.TODO_LIST_CACHE_ENABLED
+    ? createRedis(config, { keyPrefix: 'c:', log: app.log })
+    : null;
+  app.decorate('cacheRedis', cacheRedis);
+  if (cacheRedis) closeWithApp(cacheRedis);
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
@@ -239,7 +260,8 @@ export async function buildApp(
   registerAuthRoutes(app, db, config, mailer, metrics);
   // Under the existing `auth` tag, so the tag list above is unchanged.
   registerSessionRoutes(app, db, config, metrics);
-  registerTodoRoutes(app, db, idempotency, metrics);
+  const todoListCache = cacheRedis ? createTodoListCache(cacheRedis, config, app.log) : null;
+  registerTodoRoutes(app, db, idempotency, metrics, todoListCache);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.
   await registerWebRoutes(app, config);
 

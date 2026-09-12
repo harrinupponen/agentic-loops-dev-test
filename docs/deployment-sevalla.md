@@ -92,6 +92,7 @@ target.
 | `METRICS_TOKEN`     | `openssl rand -base64 48` — **required**, see below     |
 | `PORT`              | `3000`                                                  |
 | `DATABASE_POOL_MAX` | see the note below                                      |
+| `REDIS_URL`         | **leave unset** — nothing is provisioned, see below     |
 
 `ALLOWED_ORIGINS` must be set **before** a revision that ships the browser client
 is deployed. An empty value disables the CSRF origin check, so the app refuses to
@@ -106,6 +107,29 @@ It must be set **before** a revision that requires it is deployed — under
 value, or shorter than 32 characters, for the same reason as above: the counters
 there include password-reset outcomes, and an open `/metrics` turns them into a
 user-enumeration oracle. Use a different value per environment.
+
+`REDIS_URL` selects the shared rate-limit counter, and **no Redis is provisioned
+in any environment** — this deployment has the two Postgres instances above and
+nothing else shared. Unset is therefore the correct value: no client is
+constructed and the limiter counts per instance, exactly as it did before the
+capability existed. Unlike the two variables above, an empty value cannot fail a
+deploy, because it removes no control. Confirm after a deploy by finding the
+`rate limiter ready` line and checking it reads `rateLimitStore: memory`;
+anything else means a `REDIS_URL` was set somewhere unexpected. Provisioning one
+— which is two always-on billed services under this project's one-store-per-
+environment convention — is F-022. See
+`docs/adr/0018-a-shared-limiter-needs-a-store-nobody-has-bought.md`, and note
+that `agentic-todo-staging` overrides `RATE_LIMIT_MAX`/`AUTH_RATE_LIMIT_MAX` to
+`100000` for the Playwright suite, so distributed limiting will appear to do
+nothing there until that is reconciled.
+
+When one does exist, it is a credential: it carries a password, it is never
+logged (the connection-error path logs `{ host, port }` only), and an internal
+`redis://` connection needs no TLS for the same reason `DATABASE_URL` does not.
+Redis is deliberately **not** part of `/readyz`: an unreachable store degrades
+the limiter to a per-instance count rather than failing requests, and failing
+readiness would take every instance out of rotation at once
+(`docs/adr/0019-a-rate-limiter-degrades-rather-than-fails.md`).
 
 **GitHub secrets:** `SEVALLA_TOKEN` (from app.sevalla.com/api-keys).
 

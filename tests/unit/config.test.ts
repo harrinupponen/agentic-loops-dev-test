@@ -154,6 +154,38 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...base, TRACE_SAMPLE_RATIO: '0' }).TRACE_SAMPLE_RATIO).toBe(0);
   });
 
+  // A typo in REDIS_URL would leave the limiter counting per instance forever,
+  // which is exactly the state F-011 exists to make visible — so a set-but-wrong
+  // value refuses the boot in every NODE_ENV (ADR 0018).
+  it('refuses an unparseable REDIS_URL', () => {
+    expect(() => loadConfig({ ...base, REDIS_URL: 'localhost:6379' })).toThrow(/REDIS_URL/);
+  });
+
+  it('refuses a REDIS_URL whose scheme is not redis: or rediss:', () => {
+    expect(() => loadConfig({ ...base, REDIS_URL: 'postgres://localhost:5432/app' })).toThrow(
+      /REDIS_URL/,
+    );
+    expect(loadConfig({ ...base, REDIS_URL: 'redis://localhost:6379' }).REDIS_URL).toBe(
+      'redis://localhost:6379',
+    );
+    expect(loadConfig({ ...base, REDIS_URL: 'rediss://localhost:6379' }).REDIS_URL).toBe(
+      'rediss://localhost:6379',
+    );
+  });
+
+  it('rejects a REDIS_TIMEOUT_MS outside 1..1000', () => {
+    expect(() => loadConfig({ ...base, REDIS_TIMEOUT_MS: '0' })).toThrow(/REDIS_TIMEOUT_MS/);
+    expect(() => loadConfig({ ...base, REDIS_TIMEOUT_MS: '1001' })).toThrow(/REDIS_TIMEOUT_MS/);
+    expect(loadConfig(base).REDIS_TIMEOUT_MS).toBe(50);
+  });
+
+  // The deliberate, narrow departure from ADR 0007: an empty REDIS_URL removes
+  // no control, it leaves the per-instance limiter at exactly today's strength.
+  it('accepts an empty REDIS_URL under NODE_ENV=production', () => {
+    const config = loadConfig({ ...base, NODE_ENV: 'production', METRICS_TOKEN: 'm'.repeat(32) });
+    expect(config.REDIS_URL).toBe('');
+  });
+
   it('parses the origin allowlist', () => {
     const config = loadConfig({ ...base, ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
     expect(allowedOrigins(config)).toEqual(['https://a.com', 'https://b.com']);

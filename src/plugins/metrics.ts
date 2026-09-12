@@ -3,6 +3,7 @@ import client from 'prom-client';
 import type { Config } from '../config.js';
 import { bearerToken, bearerTokenMatches } from '../lib/bearer-auth.js';
 import { unauthorized } from '../lib/errors.js';
+import { rateLimitStoreOperations } from '../lib/rate-limit-store.js';
 import { spansExported, tracingStatus } from '../telemetry.js';
 
 export function registerMetrics(app: FastifyInstance, config: Config) {
@@ -14,6 +15,11 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
   // rising `failed` while `succeeded` is flat means the collector is rejecting
   // batches, which is otherwise only visible on stderr.
   registry.registerMetric(spansExported);
+
+  // Owned by src/lib/rate-limit-store.ts for the same reason: the store is
+  // constructed before this registry exists, because the limiter is registered
+  // before the metrics plugin is.
+  registry.registerMetric(rateLimitStoreOperations);
 
   const httpDuration = new client.Histogram({
     name: 'http_request_duration_seconds',
@@ -122,6 +128,19 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
         'Start the server as `node --import ./dist/telemetry.js dist/index.js`.',
     );
   }
+
+  // "Is the limiter distributed right now" has to be answerable from the logs,
+  // because an empty REDIS_URL is a deliberate and invisible state (ADR 0018).
+  // Never the URL: it carries a password.
+  app.log.info(
+    {
+      rateLimitStore: config.REDIS_URL ? 'redis' : 'memory',
+      max: config.RATE_LIMIT_MAX,
+      window: config.RATE_LIMIT_WINDOW,
+      authMax: config.AUTH_RATE_LIMIT_MAX,
+    },
+    'rate limiter ready',
+  );
 
   app.get(
     '/metrics',

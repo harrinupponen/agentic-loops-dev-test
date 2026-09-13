@@ -64,16 +64,19 @@ const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
  * debugging the busiest route in the app needs them. Keying redaction on the
  * matched route template also missed a near miss — `GET /api/todos/?q=...`
  * (trailing slash) matches `/api/todos/:id`, not `/api/todos`, and would have
- * fallen through unredacted.
+ * fallen through unredacted. Splitting on the first `?` (not `url.split('?')`,
+ * which truncates at a *second* literal `?` — legal inside a query string per
+ * RFC 3986) keeps the redactor's view of the query string identical to
+ * Fastify's own parser, which takes everything after the first `?`.
  */
 function loggableUrl(url: string, route: string | undefined): string {
   if (route && URL_PARAM_REDACTED.has(route)) return route;
-  const [path, query] = url.split('?');
-  if (query === undefined) return url;
-  const params = new URLSearchParams(query);
+  const mark = url.indexOf('?');
+  if (mark === -1) return url;
+  const params = new URLSearchParams(url.slice(mark + 1));
   if (!params.has('q')) return url;
   params.set('q', '[redacted]');
-  return `${path}?${params.toString()}`;
+  return `${url.slice(0, mark)}?${params.toString()}`;
 }
 
 export interface BuildOptions {

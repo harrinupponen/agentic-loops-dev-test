@@ -902,6 +902,18 @@ describe('todos · search', () => {
         headers: { cookie },
       });
       expect(chunks.join('')).not.toContain(nearMiss);
+
+      // The redactor must parse the query string the way the router does: a
+      // literal `?` in an earlier parameter value must not hide `q` from
+      // redaction (url.split('?') truncates at the SECOND `?`; Fastify's own
+      // parser does not).
+      chunks.length = 0;
+      const crafted = 'CraftedQueryNeedle';
+      await logged.app.inject({
+        url: `/api/todos?a=b?c&q=${crafted}`,
+        headers: { cookie },
+      });
+      expect(chunks.join('')).not.toContain(crafted);
     } finally {
       await logged.close();
     }

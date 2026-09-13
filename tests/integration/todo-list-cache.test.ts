@@ -242,6 +242,41 @@ describe('todo list cache', () => {
     expect(await redis.hkeys(key)).toEqual(['v1:live:any:1']);
   });
 
+  // F-013: the cache field has no `q` dimension, so a search response written
+  // under it would serve the caller's next plain list a truncated answer.
+  it('a search request bypasses the list cache', async () => {
+    const { cookie } = await user('search');
+    await createTodo(cookie, 'plumber');
+    await createTodo(cookie, 'milk');
+
+    const before = await cacheCounters(ctx);
+    queries.reset();
+
+    const titles = (res: { json: <T>() => T }) =>
+      res.json<{ items: { title: string }[] }>().items.map((i) => i.title);
+
+    const first = await list(cookie, '?q=plumber');
+    const second = await list(cookie, '?q=plumber');
+    expect(titles(first)).toEqual(['plumber']);
+    expect(titles(second)).toEqual(['plumber']);
+
+    // Never read from and never written to: both searches queried Postgres...
+    expect(queries.count()).toBe(2);
+    const after = await cacheCounters(ctx);
+    // ...and neither produced a get or a set of any outcome.
+    expect(after.total).toBe(before.total);
+    // Nothing was stored under any field, so the user's hash does not exist.
+    expect(await redis.keys('c:todos:*')).toEqual([]);
+
+    // And the plain list is still the whole list, not the search result.
+    const plain = await list(cookie);
+    const cached = await list(cookie);
+    expect(titles(plain)).toEqual(['milk', 'plumber']);
+    expect(cached.body).toBe(plain.body);
+    const key = (await redis.keys('c:todos:*'))[0]!;
+    expect(await redis.hkeys(key)).toEqual(['v1:live:any:20']);
+  });
+
   it('a create invalidates the caller`s list', async () => {
     const { cookie } = await user('w-create');
     await createTodo(cookie, 'first');

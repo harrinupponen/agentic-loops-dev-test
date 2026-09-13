@@ -56,11 +56,50 @@ declare module 'fastify' {
  */
 const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
 
-function loggableUrl(url: string, route: string | undefined): string {
-  if (!route || !URL_PARAM_REDACTED.has(route)) return url;
-  // Replace the concrete value with the template's placeholder, keeping any
-  // query string off the line entirely.
-  return route;
+/**
+ * Six review rounds, six ways of getting the query-string boundary wrong:
+ * `url.indexOf('?')`, `url.split('?')`, a route-keyed lookup, `#` (find-my-way
+ * splits path from query at whichever of `?` or `#` comes first), two
+ * independent computations of that same boundary disagreeing with each other
+ * given a decoy delimiter, and — the seventh, and the reason this comment
+ * stops naming individual fixes — this file asserting find-my-way also splits
+ * on `;`, which is only true when `useSemicolonDelimiter` is set (it isn't,
+ * here or anywhere in this app). Every attempt shared one flaw: reimplementing
+ * where find-my-way's parser draws a line, in a second place, in this file.
+ *
+ * This one draws no line here at all. `pathname` comes from the WHATWG `URL`
+ * parser — not hand-rolled, not asserting anything about find-my-way's
+ * internals, just Node's own standards-compliant split of a path from a query
+ * string (and a fragment, which is dropped entirely, matching find-my-way's
+ * own `#` handling with `useSemicolonDelimiter` off). The query string is
+ * never re-parsed from `url` at all: it is rebuilt from `query`, Fastify's own
+ * already-parsed result, redacting only `q`. There is no second reasoning
+ * about `q`'s location to disagree with the first, because there is no first
+ * either — nothing here decides "where is q" by looking at `url`.
+ */
+export function loggableUrl(url: string, route: string | undefined, query: unknown): string {
+  if (route && URL_PARAM_REDACTED.has(route)) return route;
+
+  let pathname: string;
+  try {
+    pathname = new URL(url, 'http://placeholder').pathname;
+  } catch {
+    // A malformed request-line target Node's own parser rejects. Nothing
+    // about `url` can be trusted enough to redact around; log nothing but
+    // the route, the one piece of this that was never derived from `url`.
+    return route ?? '';
+  }
+
+  const params = new URLSearchParams();
+  const entries = Object.entries((query as Record<string, unknown> | undefined) ?? {});
+  for (const [key, value] of entries) {
+    for (const v of Array.isArray(value) ? value : [value]) {
+      if (typeof v === 'string') params.append(key, key === 'q' ? '[redacted]' : v);
+    }
+  }
+
+  const search = params.toString();
+  return search ? `${pathname}?${search}` : pathname;
 }
 
 export interface BuildOptions {
@@ -109,7 +148,7 @@ export async function buildApp(
       serializers: {
         req: (req) => ({
           method: req.method,
-          url: loggableUrl(req.url, req.routeOptions?.url),
+          url: loggableUrl(req.url, req.routeOptions?.url, req.query),
           route: req.routeOptions?.url,
           remoteAddress: req.ip,
         }),

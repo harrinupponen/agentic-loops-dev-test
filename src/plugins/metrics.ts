@@ -104,6 +104,34 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // Incremented only when `q` is present, so a plain list moves neither label.
+  // The reading that matters is the ratio: `empty` dominating `match` means
+  // users are not finding things — either search is not doing what they expect
+  // (it is whole-word after stemming, never a prefix) or it is being used as a
+  // prefix search. It is also the worst-case latency path, so a rising `empty`
+  // and a rising duration are the same story. No query text as a label: it is
+  // user content and unbounded cardinality, which are two independent reasons.
+  const todoSearches = new client.Counter({
+    name: 'todo_search_total',
+    help: 'Todo searches by outcome',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
+
+  // The search query alone, not the whole request: `http_request_duration_seconds`
+  // labels by route pattern, so a search and a plain list are indistinguishable
+  // in it. This is the series that decides whether F-013's no-index decision was
+  // right (ADR 0023): p95 over 100 ms or p99 over 250 ms across a day means the
+  // unindexed scan has outgrown the data, and the GIN index written into that ADR
+  // is the fix — one migration, no application change. Buckets follow the HTTP
+  // histogram's shape so the two read the same way.
+  const todoSearchDuration = new client.Histogram({
+    name: 'todo_search_duration_seconds',
+    help: 'Todo title search query duration in seconds',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -186,6 +214,8 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     mailMessages,
     sessionsRevoked,
     todosSoftDeleted,
+    todoSearches,
+    todoSearchDuration,
   };
 }
 

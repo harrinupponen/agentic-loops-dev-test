@@ -949,11 +949,16 @@ describe('todos · search', () => {
         throw new Error('expected a bound TCP address');
       }
 
-      const needle = 'FragmentDelimitedNeedle';
+      // Percent-encoded and multi-word, not a single [A-Za-z]+ token: an
+      // earlier version of the fallback matched the fragment (Fastify parses
+      // it) but tested `includes(value)` against the raw decoded value while
+      // the URL still held the encoded form, so the redaction never ran.
+      const needle = 'dr smith divorce';
+      const encodedNeedle = encodeURIComponent(needle);
       const raw = await new Promise<string>((resolve, reject) => {
         const socket = connect(address.port, '127.0.0.1', () => {
           socket.write(
-            `GET /api/todos#q=${needle} HTTP/1.1\r\n` +
+            `GET /api/todos#q=${encodedNeedle} HTTP/1.1\r\n` +
               `Host: 127.0.0.1\r\n` +
               `Cookie: ${cookie}\r\n` +
               `Connection: close\r\n\r\n`,
@@ -969,6 +974,43 @@ describe('todos · search', () => {
       const output = chunks.join('');
       expect(output.length).toBeGreaterThan(0); // the stream really is capturing
       expect(output).not.toContain(needle);
+      expect(output).not.toContain(encodedNeedle);
+    } finally {
+      await logged.close();
+    }
+  });
+
+  it('redaction never touches the rest of the URL when q is present', async () => {
+    // A version of the fallback ran unconditionally, after the clean
+    // ?q=[redacted] pass had already produced a correct result, and
+    // substring-replaced the search term across the whole URL - corrupting
+    // the path and any other parameter that happened to contain the term as
+    // a substring (e.g. `q=1` inside `limit=10`).
+    const chunks: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(String(chunk));
+        cb();
+      },
+    });
+    const logged = await createTestContext(
+      { LOG_LEVEL: 'trace', AUTH_RATE_LIMIT_MAX: '10000' },
+      { logStream },
+    );
+    try {
+      await resetDb(logged.db);
+      const { cookie } = await registerUser(logged.app, 'logscan-clean-pass@example.com');
+
+      chunks.length = 0;
+      await logged.app.inject({
+        url: '/api/todos?limit=10&deleted=false&q=1',
+        headers: { cookie },
+      });
+      const output = chunks.join('');
+      expect(output.length).toBeGreaterThan(0);
+      expect(output).toContain('/api/todos?limit=10&deleted=false&q=%5Bredacted%5D');
+      expect(output).not.toContain('limit=[redacted]0');
+      expect(output).not.toContain('[redacted]pi/todos');
     } finally {
       await logged.close();
     }

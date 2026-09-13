@@ -63,40 +63,50 @@ const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
  * `cursor`, `completed`, and `deleted` are not sensitive and an operator
  * debugging the busiest route in the app needs them.
  *
- * Three rounds of review found three different ways a hand-rolled
- * query-string parser here disagreed with Fastify's router: a trailing slash
- * routing to a different template than the redaction set expected, a literal
- * `?` inside a value (legal per RFC 3986, but `url.split('?')` truncates at
- * it), and `#` — find-my-way's own delimiter splits path from query at
- * whichever of `?` or `#` comes first, which nothing here anticipated. Rather
- * than chase a fourth way to reimplement that split, `query` is Fastify's own
- * already-parsed result: the best-effort `URLSearchParams` pass below handles
- * the common `?q=...` case cleanly, and the terminal step redacts by literal
- * substring match against whatever Fastify actually parsed `q` as — which
- * cannot be fooled by a delimiter, because it never looks for one.
+ * Four review rounds found four different ways of trying to locate *where*
+ * the value sits in the URL string went wrong: a trailing slash routing to a
+ * different template than the redaction set expected, a literal `?` inside a
+ * value (`url.split('?')` truncates at a second one), `#` (find-my-way splits
+ * path from query at whichever of `?` or `#` comes first), and percent-
+ * encoding (a value substring-matched against its own encoded form in the
+ * URL). The fix is to stop locating the value at all. `query` is Fastify's
+ * own already-parsed result, so this function only ever needs to know
+ * *whether* Fastify found a `q` — never where in the string or how it was
+ * encoded. The `URLSearchParams` pass produces a clean `?q=[redacted]` for
+ * the common case and is trusted as-is when it also saw `q`; the only time
+ * this function goes looking further is when Fastify parsed a `q` that pass
+ * did not see, meaning the value reached the router through some path this
+ * function doesn't otherwise understand — and in that one case, it drops the
+ * entire query string rather than trying to redact around a value it cannot
+ * reliably find.
  */
-function loggableUrl(url: string, route: string | undefined, query: unknown): string {
+/** Exported for tests/unit/loggable-url.test.ts — this exact function has had
+ * five review-found bugs; a table-driven unit test catches a regression in
+ * milliseconds instead of needing a real Postgres-backed integration run. */
+export function loggableUrl(url: string, route: string | undefined, query: unknown): string {
   if (route && URL_PARAM_REDACTED.has(route)) return route;
 
   let candidate = url;
+  let cleanPassSawQ = false;
   const mark = url.indexOf('?');
   if (mark !== -1) {
     const params = new URLSearchParams(url.slice(mark + 1));
     if (params.has('q')) {
+      cleanPassSawQ = true;
       params.set('q', '[redacted]');
       candidate = `${url.slice(0, mark)}?${params.toString()}`;
     }
   }
+  if (cleanPassSawQ) return candidate;
 
   const parsedQ = (query as Record<string, unknown> | undefined)?.q;
-  const values = Array.isArray(parsedQ) ? parsedQ : typeof parsedQ === 'string' ? [parsedQ] : [];
-  for (const value of values) {
-    if (typeof value === 'string' && value.length > 0 && candidate.includes(value)) {
-      const encoded = encodeURIComponent(value);
-      candidate = candidate.split(value).join('[redacted]').split(encoded).join('[redacted]');
-    }
-  }
-  return candidate;
+  const fastifySawQ = Array.isArray(parsedQ)
+    ? parsedQ.some((v) => typeof v === 'string' && v.length > 0)
+    : typeof parsedQ === 'string' && parsedQ.length > 0;
+  if (!fastifySawQ) return url;
+
+  const firstDelimiter = url.search(/[?#;]/);
+  return firstDelimiter === -1 ? url : url.slice(0, firstDelimiter);
 }
 
 export interface BuildOptions {

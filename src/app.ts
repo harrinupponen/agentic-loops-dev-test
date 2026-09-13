@@ -61,22 +61,42 @@ const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
  * route's whole query string: `q` puts user-typed search text in a log line
  * (the same category of content as a todo title, F-013), but `limit`,
  * `cursor`, `completed`, and `deleted` are not sensitive and an operator
- * debugging the busiest route in the app needs them. Keying redaction on the
- * matched route template also missed a near miss — `GET /api/todos/?q=...`
- * (trailing slash) matches `/api/todos/:id`, not `/api/todos`, and would have
- * fallen through unredacted. Splitting on the first `?` (not `url.split('?')`,
- * which truncates at a *second* literal `?` — legal inside a query string per
- * RFC 3986) keeps the redactor's view of the query string identical to
- * Fastify's own parser, which takes everything after the first `?`.
+ * debugging the busiest route in the app needs them.
+ *
+ * Three rounds of review found three different ways a hand-rolled
+ * query-string parser here disagreed with Fastify's router: a trailing slash
+ * routing to a different template than the redaction set expected, a literal
+ * `?` inside a value (legal per RFC 3986, but `url.split('?')` truncates at
+ * it), and `#` — find-my-way's own delimiter splits path from query at
+ * whichever of `?` or `#` comes first, which nothing here anticipated. Rather
+ * than chase a fourth way to reimplement that split, `query` is Fastify's own
+ * already-parsed result: the best-effort `URLSearchParams` pass below handles
+ * the common `?q=...` case cleanly, and the terminal step redacts by literal
+ * substring match against whatever Fastify actually parsed `q` as — which
+ * cannot be fooled by a delimiter, because it never looks for one.
  */
-function loggableUrl(url: string, route: string | undefined): string {
+function loggableUrl(url: string, route: string | undefined, query: unknown): string {
   if (route && URL_PARAM_REDACTED.has(route)) return route;
+
+  let candidate = url;
   const mark = url.indexOf('?');
-  if (mark === -1) return url;
-  const params = new URLSearchParams(url.slice(mark + 1));
-  if (!params.has('q')) return url;
-  params.set('q', '[redacted]');
-  return `${url.slice(0, mark)}?${params.toString()}`;
+  if (mark !== -1) {
+    const params = new URLSearchParams(url.slice(mark + 1));
+    if (params.has('q')) {
+      params.set('q', '[redacted]');
+      candidate = `${url.slice(0, mark)}?${params.toString()}`;
+    }
+  }
+
+  const parsedQ = (query as Record<string, unknown> | undefined)?.q;
+  const values = Array.isArray(parsedQ) ? parsedQ : typeof parsedQ === 'string' ? [parsedQ] : [];
+  for (const value of values) {
+    if (typeof value === 'string' && value.length > 0 && candidate.includes(value)) {
+      const encoded = encodeURIComponent(value);
+      candidate = candidate.split(value).join('[redacted]').split(encoded).join('[redacted]');
+    }
+  }
+  return candidate;
 }
 
 export interface BuildOptions {
@@ -125,7 +145,7 @@ export async function buildApp(
       serializers: {
         req: (req) => ({
           method: req.method,
-          url: loggableUrl(req.url, req.routeOptions?.url),
+          url: loggableUrl(req.url, req.routeOptions?.url, req.query),
           route: req.routeOptions?.url,
           remoteAddress: req.ip,
         }),

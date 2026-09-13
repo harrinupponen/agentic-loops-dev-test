@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { connect } from 'node:net';
 import { Writable } from 'node:stream';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { todos } from '../../src/db/schema.js';
@@ -914,6 +915,60 @@ describe('todos · search', () => {
         headers: { cookie },
       });
       expect(chunks.join('')).not.toContain(crafted);
+    } finally {
+      await logged.close();
+    }
+  });
+
+  it('a fragment-delimited query cannot bypass redaction', async () => {
+    // app.inject never reaches this: it drops everything from '#' onward the
+    // way a browser's URL parser would, so it can't reproduce what a raw
+    // client connection sends. find-my-way (Fastify's router) splits path
+    // from query string at whichever of '?' or '#' comes first, so
+    // `GET /api/todos#q=<text>` routes to /api/todos with `q` in the parsed
+    // query exactly as `?q=<text>` would - a delimiter earlier redaction
+    // rounds treated as query-string syntax, but the app-level router does
+    // not. This needs a real socket to prove.
+    const chunks: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(String(chunk));
+        cb();
+      },
+    });
+    const logged = await createTestContext(
+      { LOG_LEVEL: 'trace', AUTH_RATE_LIMIT_MAX: '10000' },
+      { logStream },
+    );
+    try {
+      await resetDb(logged.db);
+      const { cookie } = await registerUser(logged.app, 'logscan-fragment@example.com');
+      await logged.app.listen({ port: 0, host: '127.0.0.1' });
+      const address = logged.app.server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('expected a bound TCP address');
+      }
+
+      const needle = 'FragmentDelimitedNeedle';
+      const raw = await new Promise<string>((resolve, reject) => {
+        const socket = connect(address.port, '127.0.0.1', () => {
+          socket.write(
+            `GET /api/todos#q=${needle} HTTP/1.1\r\n` +
+              `Host: 127.0.0.1\r\n` +
+              `Cookie: ${cookie}\r\n` +
+              `Connection: close\r\n\r\n`,
+          );
+        });
+        const parts: Buffer[] = [];
+        socket.on('data', (d) => parts.push(d));
+        socket.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
+        socket.on('error', reject);
+      });
+      expect(raw).toContain('HTTP/1.1 200');
+
+      const output = chunks.join('');
+      expect(output.length).toBeGreaterThan(0); // the stream really is capturing
+      expect(output).not.toContain(needle);
     } finally {
       await logged.close();
     }

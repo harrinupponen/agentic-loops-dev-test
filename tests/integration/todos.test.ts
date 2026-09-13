@@ -1015,4 +1015,57 @@ describe('todos · search', () => {
       await logged.close();
     }
   });
+
+  it('a decoy "?" after the real "#" delimiter cannot mask the real query string', async () => {
+    // Round 6: the clean pass computed the query-string boundary with
+    // url.indexOf('?'), while the "did Fastify see a q the clean pass
+    // missed" check used search(/[?#;]/). A URL with '#' before a later '?'
+    // let the clean pass parse the WRONG region (after the '?'), find an
+    // unrelated decoy `q` there, and short-circuit before ever reaching the
+    // real query string right after the '#'. This needs a real socket, same
+    // as the other fragment case.
+    const chunks: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(String(chunk));
+        cb();
+      },
+    });
+    const logged = await createTestContext(
+      { LOG_LEVEL: 'trace', AUTH_RATE_LIMIT_MAX: '10000' },
+      { logStream },
+    );
+    try {
+      await resetDb(logged.db);
+      const { cookie } = await registerUser(logged.app, 'logscan-decoy@example.com');
+      await logged.app.listen({ port: 0, host: '127.0.0.1' });
+      const address = logged.app.server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('expected a bound TCP address');
+      }
+
+      const needle = 'SECRETNEEDLE';
+      const raw = await new Promise<string>((resolve, reject) => {
+        const socket = connect(address.port, '127.0.0.1', () => {
+          socket.write(
+            `GET /api/todos#q=${needle}?q=decoy HTTP/1.1\r\n` +
+              `Host: 127.0.0.1\r\n` +
+              `Cookie: ${cookie}\r\n` +
+              `Connection: close\r\n\r\n`,
+          );
+        });
+        const parts: Buffer[] = [];
+        socket.on('data', (d) => parts.push(d));
+        socket.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
+        socket.on('error', reject);
+      });
+      expect(raw).toContain('HTTP/1.1 200');
+
+      const output = chunks.join('');
+      expect(output.length).toBeGreaterThan(0);
+      expect(output).not.toContain(needle);
+    } finally {
+      await logged.close();
+    }
+  });
 });

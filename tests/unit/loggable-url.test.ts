@@ -55,25 +55,27 @@ describe('loggableUrl', () => {
     ).toBe('/api/todos?a=b%3Fc&q=%5Bredacted%5D');
   });
 
-  it('drops the query string when q reached the router past a delimiter this function does not parse', () => {
+  it('redacts a "#"-delimited query in place, sharing the same boundary find-my-way uses', () => {
     // Round 3: find-my-way splits path from query at whichever of '?' or '#'
-    // comes first. There is no '?' at all here, so the clean pass sees no
-    // query string; only the parsed `query` tells this function q existed.
+    // comes first. QUERY_DELIMITER matches both, so the clean pass now finds
+    // this query string exactly where the router does, rather than needing
+    // the parsed `query` fallback to tell it q existed at all.
     expect(
       loggableUrl('/api/todos#q=FragmentDelimitedNeedle', '/api/todos', {
         q: 'FragmentDelimitedNeedle',
       }),
-    ).toBe('/api/todos');
+    ).toBe('/api/todos#q=%5Bredacted%5D');
   });
 
-  it('drops the query string for a percent-encoded value the clean pass could not locate', () => {
+  it('redacts a percent-encoded value in place via the same shared boundary', () => {
     // Round 4: a fallback that tried to substring-match the RAW parsed value
-    // against a URL that only held the ENCODED form never fired.
+    // against a URL that only held the ENCODED form never fired. The clean
+    // pass needs no such match at all - it redacts by key, not by value.
     expect(
       loggableUrl('/api/todos#q=dr%20smith%20divorce', '/api/todos', {
         q: 'dr smith divorce',
       }),
-    ).toBe('/api/todos');
+    ).toBe('/api/todos#q=%5Bredacted%5D');
   });
 
   it('never runs the fallback — and never touches other parameters — when the clean pass already redacted q', () => {
@@ -88,7 +90,28 @@ describe('loggableUrl', () => {
   it('handles a duplicate-key q parsed as an array by Fastify', () => {
     expect(
       loggableUrl('/api/todos#q=first&q=second', '/api/todos', { q: ['first', 'second'] }),
-    ).toBe('/api/todos');
+    ).toBe('/api/todos#q=%5Bredacted%5D');
+  });
+
+  it('is a safe no-op when query claims a q but the url has no delimiter at all', () => {
+    // There is nothing in the url text to redact around or drop: with no
+    // '?', '#', or ';' present, there is no query-string region for the
+    // value to occupy, so the url passes through unchanged.
+    expect(loggableUrl('/api/todos', '/api/todos', { q: 'GhostNeedle' })).toBe('/api/todos');
+  });
+
+  it('a decoy "?" after the real delimiter cannot mask the real query string', () => {
+    // Round 6: the clean pass and its own "did Fastify see a q" check used to
+    // computed the query-string boundary two different ways (`indexOf('?')`
+    // vs `search(/[?#;]/)`), so a URL with '#' before a later '?' let the
+    // clean pass parse the wrong region, find an unrelated decoy `q` there,
+    // and short-circuit before ever reaching the real one. There is now
+    // exactly one boundary computation, so both passes always agree.
+    expect(
+      loggableUrl('/api/todos#q=SECRETNEEDLE?q=decoy', '/api/todos', {
+        q: 'SECRETNEEDLE?q=decoy',
+      }),
+    ).toBe('/api/todos#q=%5Bredacted%5D');
   });
 
   it('is a no-op when q is present in the query object but empty', () => {

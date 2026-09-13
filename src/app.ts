@@ -57,57 +57,49 @@ declare module 'fastify' {
 const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
 
 /**
- * find-my-way (Fastify's router) splits a URL's path from its query string at
- * whichever of `?`, `#`, or `;` comes first. Every prior redaction attempt
- * here computed that boundary a second, independent way — `url.indexOf('?')`,
- * `url.split('?')`, a route-keyed lookup — and five review rounds each found
- * a case where that second computation disagreed with the router's. The
- * fifth found the root cause: as long as two different pieces of code decide
- * "where does the query string start" separately, they can always be made to
- * disagree, including a `#` occurring before a later decoy `?`. There is
- * exactly one such expression in this file now, shared by both the redaction
- * pass and its own reasoning below, and nothing here decides that boundary
- * any other way.
- */
-const QUERY_DELIMITER = /[?#;]/;
-
-/**
- * Redact only the `q` parameter's value, wherever it appears, rather than a
- * route's whole query string: `q` puts user-typed search text in a log line
- * (the same category of content as a todo title, F-013), but `limit`,
- * `cursor`, `completed`, and `deleted` are not sensitive and an operator
- * debugging the busiest route in the app needs them.
+ * Six review rounds, six ways of getting the query-string boundary wrong:
+ * `url.indexOf('?')`, `url.split('?')`, a route-keyed lookup, `#` (find-my-way
+ * splits path from query at whichever of `?` or `#` comes first), two
+ * independent computations of that same boundary disagreeing with each other
+ * given a decoy delimiter, and — the seventh, and the reason this comment
+ * stops naming individual fixes — this file asserting find-my-way also splits
+ * on `;`, which is only true when `useSemicolonDelimiter` is set (it isn't,
+ * here or anywhere in this app). Every attempt shared one flaw: reimplementing
+ * where find-my-way's parser draws a line, in a second place, in this file.
  *
- * The `URLSearchParams` pass below parses the same substring find-my-way
- * itself hands to its query-string parser (everything after the first
- * `QUERY_DELIMITER` match, unsplit on any later one), so its `q` — if any —
- * is the same value Fastify parsed, not a second, independently-derived
- * guess. `query` (Fastify's own already-parsed result) exists only as a
- * defensive check that this reasoning actually held for a given request: if
- * Fastify saw a `q` this pass somehow didn't, something upstream has drifted
- * from find-my-way's behaviour in a way this function no longer tries to
- * name, and the whole query string is dropped rather than guessed at.
+ * This one draws no line here at all. `pathname` comes from the WHATWG `URL`
+ * parser — not hand-rolled, not asserting anything about find-my-way's
+ * internals, just Node's own standards-compliant split of a path from a query
+ * string (and a fragment, which is dropped entirely, matching find-my-way's
+ * own `#` handling with `useSemicolonDelimiter` off). The query string is
+ * never re-parsed from `url` at all: it is rebuilt from `query`, Fastify's own
+ * already-parsed result, redacting only `q`. There is no second reasoning
+ * about `q`'s location to disagree with the first, because there is no first
+ * either — nothing here decides "where is q" by looking at `url`.
  */
 export function loggableUrl(url: string, route: string | undefined, query: unknown): string {
   if (route && URL_PARAM_REDACTED.has(route)) return route;
 
-  const match = QUERY_DELIMITER.exec(url);
-  const parsedQ = (query as Record<string, unknown> | undefined)?.q;
-  const fastifySawQ = Array.isArray(parsedQ)
-    ? parsedQ.some((v) => typeof v === 'string' && v.length > 0)
-    : typeof parsedQ === 'string' && parsedQ.length > 0;
-
-  if (!match) return url;
-  const mark = match.index;
-  const delimiter = match[0];
-
-  const params = new URLSearchParams(url.slice(mark + 1));
-  if (params.has('q')) {
-    params.set('q', '[redacted]');
-    return `${url.slice(0, mark)}${delimiter}${params.toString()}`;
+  let pathname: string;
+  try {
+    pathname = new URL(url, 'http://placeholder').pathname;
+  } catch {
+    // A malformed request-line target Node's own parser rejects. Nothing
+    // about `url` can be trusted enough to redact around; log nothing but
+    // the route, the one piece of this that was never derived from `url`.
+    return route ?? '';
   }
 
-  return fastifySawQ ? url.slice(0, mark) : url;
+  const params = new URLSearchParams();
+  const entries = Object.entries((query as Record<string, unknown> | undefined) ?? {});
+  for (const [key, value] of entries) {
+    for (const v of Array.isArray(value) ? value : [value]) {
+      if (typeof v === 'string') params.append(key, key === 'q' ? '[redacted]' : v);
+    }
+  }
+
+  const search = params.toString();
+  return search ? `${pathname}?${search}` : pathname;
 }
 
 export interface BuildOptions {

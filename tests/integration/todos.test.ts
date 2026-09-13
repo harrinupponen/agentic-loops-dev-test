@@ -1068,4 +1068,58 @@ describe('todos · search', () => {
       await logged.close();
     }
   });
+
+  it('a decoy ";" in the path cannot be mistaken for a second query delimiter', async () => {
+    // Round 7: a fix asserted find-my-way splits on ';' the way it does '?'
+    // and '#'. That's only true with useSemicolonDelimiter set, which this
+    // app does not set, so ';' is an ordinary path character to the real
+    // router - the assertion itself was the seventh instance of two pieces
+    // of code disagreeing about where the query string starts.
+    const chunks: string[] = [];
+    const logStream = new Writable({
+      write(chunk, _enc, cb) {
+        chunks.push(String(chunk));
+        cb();
+      },
+    });
+    const logged = await createTestContext(
+      { LOG_LEVEL: 'trace', AUTH_RATE_LIMIT_MAX: '10000' },
+      { logStream },
+    );
+    try {
+      await resetDb(logged.db);
+      const { cookie } = await registerUser(logged.app, 'logscan-semicolon@example.com');
+      await logged.app.listen({ port: 0, host: '127.0.0.1' });
+      const address = logged.app.server.address();
+      if (address === null || typeof address === 'string') {
+        throw new Error('expected a bound TCP address');
+      }
+
+      const needle = 'SECRETNEEDLE';
+      const raw = await new Promise<string>((resolve, reject) => {
+        const socket = connect(address.port, '127.0.0.1', () => {
+          socket.write(
+            `GET /api/todos/abc;q=decoy&z=1?q=${needle} HTTP/1.1\r\n` +
+              `Host: 127.0.0.1\r\n` +
+              `Cookie: ${cookie}\r\n` +
+              `Connection: close\r\n\r\n`,
+          );
+        });
+        const parts: Buffer[] = [];
+        socket.on('data', (d) => parts.push(d));
+        socket.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
+        socket.on('error', reject);
+      });
+      // The id "abc;q=decoy&z=1" is not a valid uuid, so this 400s on
+      // validation - the request still reaches routing and logging either
+      // way, which is all this test needs.
+      expect(raw).toContain('HTTP/1.1 400');
+
+      const output = chunks.join('');
+      expect(output.length).toBeGreaterThan(0);
+      expect(output).not.toContain(needle);
+    } finally {
+      await logged.close();
+    }
+  });
 });

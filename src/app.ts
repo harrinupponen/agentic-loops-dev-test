@@ -57,22 +57,23 @@ declare module 'fastify' {
 const URL_PARAM_REDACTED = new Set(['/api/auth/sessions/:id']);
 
 /**
- * Routes whose query string must not reach a log line, keyed by route template.
- * F-013 puts user-typed text in `?q=` on the todo list: it says what someone was
- * looking for, which is the same category of content as a todo title and
- * sometimes more revealing, and F-013 requires that no log line produced by a
- * search contains it. The path is still logged, and the search itself logs its
- * outcome and row count structurally, so nothing an operator needs is lost.
+ * Redact only the `q` parameter's value, wherever it appears, rather than a
+ * route's whole query string: `q` puts user-typed search text in a log line
+ * (the same category of content as a todo title, F-013), but `limit`,
+ * `cursor`, `completed`, and `deleted` are not sensitive and an operator
+ * debugging the busiest route in the app needs them. Keying redaction on the
+ * matched route template also missed a near miss — `GET /api/todos/?q=...`
+ * (trailing slash) matches `/api/todos/:id`, not `/api/todos`, and would have
+ * fallen through unredacted.
  */
-const URL_QUERY_REDACTED = new Set(['/api/todos']);
-
 function loggableUrl(url: string, route: string | undefined): string {
-  if (!route) return url;
-  // Replace the concrete value with the template's placeholder, keeping any
-  // query string off the line entirely.
-  if (URL_PARAM_REDACTED.has(route)) return route;
-  if (URL_QUERY_REDACTED.has(route)) return url.split('?')[0] ?? route;
-  return url;
+  if (route && URL_PARAM_REDACTED.has(route)) return route;
+  const [path, query] = url.split('?');
+  if (query === undefined) return url;
+  const params = new URLSearchParams(query);
+  if (!params.has('q')) return url;
+  params.set('q', '[redacted]');
+  return `${path}?${params.toString()}`;
 }
 
 export interface BuildOptions {

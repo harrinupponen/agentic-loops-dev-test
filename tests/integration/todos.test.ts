@@ -877,6 +877,31 @@ describe('todos · search', () => {
       expect(output).toContain('todo search'); // the search really did log
       expect(output).not.toContain(title);
       expect(output).not.toContain(miss);
+
+      // A plain list request carries no sensitive parameter, so redaction must
+      // not blind an operator to it: limit/deleted/completed still belong in
+      // the access log for the busiest route in the app.
+      chunks.length = 0;
+      await logged.app.inject({
+        url: '/api/todos?limit=5&deleted=true&completed=true',
+        headers: { cookie },
+      });
+      const plainOutput = chunks.join('');
+      expect(plainOutput).toContain('limit=5');
+      expect(plainOutput).toContain('deleted=true');
+      expect(plainOutput).toContain('completed=true');
+
+      // Redaction must key on the parameter, not the matched route: a request
+      // that lands on a different route template (here, a trailing slash
+      // routing to /api/todos/:id instead of /api/todos) must not let a search
+      // term slip through unredacted.
+      chunks.length = 0;
+      const nearMiss = 'TrailingSlashNeedle';
+      await logged.app.inject({
+        url: `/api/todos/?q=${encodeURIComponent(nearMiss)}`,
+        headers: { cookie },
+      });
+      expect(chunks.join('')).not.toContain(nearMiss);
     } finally {
       await logged.close();
     }

@@ -24,6 +24,7 @@ import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
 import { registerMetrics } from './plugins/metrics.js';
 import { registerTracing } from './plugins/tracing.js';
+import { registerAuditRoutes } from './routes/audit.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
 import { registerSessionRoutes } from './routes/sessions.js';
@@ -299,6 +300,10 @@ export async function buildApp(
   registerAuthRoutes(app, db, config, mailer, metrics);
   // Under the existing `auth` tag, so the tag list above is unchanged.
   registerSessionRoutes(app, db, config, metrics);
+  // Also under the `auth` tag, in its own file for the same reason the session
+  // routes are: src/routes/auth.ts is large and CODEOWNERS-protected, and this
+  // feature's surface should be reviewable on its own.
+  registerAuditRoutes(app, db);
   const todoListCache = cacheRedis ? createTodoListCache(cacheRedis, config, app.log) : null;
   registerTodoRoutes(app, db, idempotency, metrics, todoListCache);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.

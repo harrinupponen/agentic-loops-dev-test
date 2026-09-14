@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { Database } from '../db/client.js';
 import { emailVerificationTokens, passwordResetTokens, sessions, users } from '../db/schema.js';
+import { recordAuditEvent, sweepAuditEvents } from '../lib/audit.js';
 import { AppError, badRequest, conflict, unauthorized } from '../lib/errors.js';
 import type { Mailer } from '../lib/mailer.js';
 import { SESSION_COOKIE, truncateUserAgent } from '../lib/session.js';
@@ -56,7 +57,15 @@ export function registerAuthRoutes(
   db: Database,
   config: Config,
   mailer: Mailer,
-  metrics: Pick<Metrics, 'passwordResets' | 'emailVerifications' | 'mailMessages'>,
+  metrics: Pick<
+    Metrics,
+    | 'passwordResets'
+    | 'emailVerifications'
+    | 'mailMessages'
+    | 'auditEvents'
+    | 'auditWriteFailures'
+    | 'auditEventsPurged'
+  >,
 ) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
@@ -161,6 +170,13 @@ export function registerAuthRoutes(
         truncateUserAgent(request.headers['user-agent']),
       );
       setSessionCookie(reply, config, token, expiresAt);
+      // The first row of every trail: "this account was created at T". After
+      // the state change, never inside a transaction, and never fatal.
+      await recordAuditEvent(request, db, metrics, {
+        userId: user.id,
+        action: 'auth.register',
+        outcome: 'success',
+      });
       await issueEmailVerification(request, user, 'issued');
       // A row this insert just created is unverified by construction.
       return reply.status(201).send({ ...user, emailVerified: false });
@@ -190,7 +206,31 @@ export function registerAuthRoutes(
       // Always run a verification so response time does not reveal account existence.
       const digest = user?.passwordHash ?? DUMMY_HASH;
       const ok = await verifyPassword(digest, password);
-      if (!user || !ok) throw unauthorized('Invalid email or password');
+      if (!user || !ok) {
+        // ASYMMETRIC BY DESIGN, and the line a reviewer should push on first.
+        // A failed attempt against a KNOWN address is the single highest-value
+        // row in this feature — somebody is guessing this account's password —
+        // and one against an unknown address writes nothing at all: there is no
+        // account to own the row, so nobody could ever read it, and the only
+        // way to make it meaningful would be to store the attempted address,
+        // building a table of email addresses belonging to people who are NOT
+        // users of this service. The response body and status code are
+        // identical on both branches; the residual channel is timing, bounded
+        // by the argon2 verification both branches run and by
+        // AUTH_RATE_LIMIT_MAX. See the spec's enumeration-timing heading.
+        if (user) {
+          await recordAuditEvent(request, db, metrics, {
+            userId: user.id,
+            action: 'auth.login',
+            outcome: 'failure',
+          });
+          // On failure too, not just success: the rows this table accumulates
+          // fastest are written by whoever is attacking the account, so the
+          // attacker's own traffic purges up to 100 expired rows per attempt.
+          await sweepAuditEvents(request, db, metrics, user.id);
+        }
+        throw unauthorized('Invalid email or password');
+      }
 
       const { token, expiresAt } = await createSession(
         db,
@@ -199,6 +239,16 @@ export function registerAuthRoutes(
         truncateUserAgent(request.headers['user-agent']),
       );
       setSessionCookie(reply, config, token, expiresAt);
+      // "Somebody signed in as me at T", answerable long after the session it
+      // created has gone. Never fatal: the session already exists and the
+      // cookie is already on the reply, so a 500 here would report an error for
+      // an operation that succeeded (ADR 0024).
+      await recordAuditEvent(request, db, metrics, {
+        userId: user.id,
+        action: 'auth.login',
+        outcome: 'success',
+      });
+      await sweepAuditEvents(request, db, metrics, user.id);
       // Login is deliberately not gated on verification (ADR 0011); the state
       // is reported so a client can prompt, and nothing more.
       return reply.send({
@@ -310,6 +360,19 @@ export function registerAuthRoutes(
               request.log.error({ err }, 'password reset mail failed');
             });
         }
+
+        // Recorded for every request against a known address, including one
+        // the 60-second cooldown swallowed: the event is "somebody asked to
+        // reset my password and I did not", and the asking is what the account
+        // owner needs to see. It reaches a victim who never receives the mail.
+        // Outside the `issued` branch for exactly that reason, and inside the
+        // `user` branch for the same reason the failed-sign-in row is: there is
+        // no account to own a row for an address that matches nothing.
+        await recordAuditEvent(request, db, metrics, {
+          userId: user.id,
+          action: 'password_reset.requested',
+          outcome: 'success',
+        });
       }
 
       // send() with no argument, not send(null): the latter serialises to the
@@ -342,8 +405,9 @@ export function registerAuthRoutes(
       const passwordHash = await hashPassword(password);
       const tokenHash = hashRecoveryToken(token);
 
+      let resetUserId: string;
       try {
-        await db.transaction(async (tx) => {
+        resetUserId = await db.transaction(async (tx) => {
           // Deleting IS the single-use check: one atomic statement, no
           // `used_at` column to forget, and two concurrent confirms cannot
           // both win. Served by the unique constraint on token_hash.
@@ -376,6 +440,12 @@ export function registerAuthRoutes(
           // there is no window where both the new password and an old session
           // are live. Served by sessions_user_id_idx.
           await tx.delete(sessions).where(eq(sessions.userId, row.userId));
+          // Returned, not audited here: the audit write goes after the
+          // transaction commits, never inside it. Inside, a bookkeeping row
+          // that would not insert could roll back a password change and a full
+          // session purge — an audit log able to undo a security operation is a
+          // new way to attack it (ADR 0024).
+          return row.userId;
         });
       } catch (err) {
         // Only the two deliberate rejections are counted; an unexpected
@@ -391,6 +461,14 @@ export function registerAuthRoutes(
 
       metrics.passwordResets.inc({ outcome: 'consumed' });
       request.log.info({ passwordReset: { outcome: 'consumed' } }, 'password reset completed');
+      // The credential changed and every session died with it. A rejected
+      // token reaches neither this line nor the table: the throw above is the
+      // only exit from the catch.
+      await recordAuditEvent(request, db, metrics, {
+        userId: resetUserId,
+        action: 'password_reset.completed',
+        outcome: 'success',
+      });
       return reply.status(204).send(null);
     },
   );

@@ -118,6 +118,31 @@ export const emailVerificationTokens = pgTable('email_verification_tokens', {
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 });
 
+// Append-only, one row per security-relevant event, owned by the account the
+// event happened to. Four columns and no more: no `details jsonb`, no IP, no
+// user agent, no email (ADR 0025). No secondary index — the composite primary
+// key serves both the read endpoint and the 90-day retention sweep, which use
+// the same `(user_id, created_at)` prefix.
+export const auditEvents = pgTable(
+  'audit_events',
+  {
+    id: uuid('id').notNull().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    // Plain text with no CHECK constraint and no pgEnum: the closed set lives
+    // in the AuditAction union in src/lib/audit.ts, which the one writer
+    // accepts, so adding an action later is a code change rather than a
+    // destructive migration. See ADR 0025.
+    action: text('action').notNull(),
+    outcome: text('outcome').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  // `id` is the tie-break: now() is constant within a transaction, so two
+  // events written by the same request must still be distinct rows.
+  (t) => [primaryKey({ columns: [t.userId, t.createdAt, t.id] })],
+);
+
 export const usersRelations = relations(users, ({ many }) => ({
   sessions: many(sessions),
   todos: many(todos),
@@ -138,6 +163,7 @@ export const schema = {
   idempotencyKeys,
   passwordResetTokens,
   emailVerificationTokens,
+  auditEvents,
   usersRelations,
   sessionsRelations,
   todosRelations,

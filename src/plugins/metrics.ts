@@ -132,6 +132,42 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // One increment per row successfully written. Bounded cardinality by
+  // construction: the action set is closed (ADR 0025) and `outcome` has two
+  // values, so at most 14 series. No user id and no email as a label — one is
+  // unbounded cardinality, the other is PII. The reading that matters is
+  // action="auth.login", outcome="failure" rising across the population, which
+  // is credential stuffing seen from the front door rather than inferred from
+  // the login error rate; it complements sessions_revoked_total{scope="others"},
+  // where the same attack shows up later as users revoking sessions.
+  const auditEvents = new client.Counter({
+    name: 'audit_events_total',
+    help: 'Security-relevant events recorded, by action and outcome',
+    labelNames: ['action', 'outcome'],
+    registers: [registry],
+  });
+
+  // The only counter in this application whose correct value is exactly zero,
+  // and the direct consequence of ADR 0024: because a failed audit write is
+  // invisible to the user by design, this is the only thing that says the trail
+  // has holes. Any non-zero value means the log is incomplete and every
+  // conclusion drawn from it afterwards is unsound. First alert rule for F-019.
+  const auditWriteFailures = new client.Counter({
+    name: 'audit_write_failures_total',
+    help: 'Audit rows that could not be written (the trail has holes)',
+    registers: [registry],
+  });
+
+  // Advanced by the number of rows each sweep actually removed, so it carries
+  // how wide the sweep was. ADR 0017's operational tell: flat at zero for
+  // longer than 90 days after launch means retention is fiction, and nothing
+  // else in the system will say so.
+  const auditEventsPurged = new client.Counter({
+    name: 'audit_events_purged_total',
+    help: 'Audit rows removed by the retention sweep',
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -216,6 +252,9 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     todosSoftDeleted,
     todoSearches,
     todoSearchDuration,
+    auditEvents,
+    auditWriteFailures,
+    auditEventsPurged,
   };
 }
 

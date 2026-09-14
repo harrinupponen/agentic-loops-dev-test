@@ -83,7 +83,7 @@ export async function createTestContext(
 /** Cascading truncate keeps tests independent without paying for a fresh schema. */
 export async function resetDb(db: Database) {
   await db.execute(
-    sql`TRUNCATE TABLE email_verification_tokens, password_reset_tokens, idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
+    sql`TRUNCATE TABLE audit_events, email_verification_tokens, password_reset_tokens, idempotency_keys, todos, sessions, users RESTART IDENTITY CASCADE`,
   );
 }
 

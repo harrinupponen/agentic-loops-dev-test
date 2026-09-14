@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Config } from '../config.js';
 import type { Database } from '../db/client.js';
 import { sessions } from '../db/schema.js';
+import { recordAuditEvent } from '../lib/audit.js';
 import { notFound, unauthorized } from '../lib/errors.js';
 import { clearSessionCookie, requireAuth } from '../plugins/auth.js';
 import type { Metrics } from '../plugins/metrics.js';
@@ -51,7 +52,10 @@ export function registerSessionRoutes(
   app: FastifyInstance,
   db: Database,
   config: Config,
-  metrics: Pick<Metrics, 'sessionsRevoked'>,
+  metrics: Pick<
+    Metrics,
+    'sessionsRevoked' | 'auditEvents' | 'auditWriteFailures' | 'auditEventsPurged'
+  >,
 ) {
   const r = app.withTypeProvider<ZodTypeProvider>();
 
@@ -139,6 +143,15 @@ export function registerSessionRoutes(
         { session: { action: 'revoke', scope: 'single', count: 1 } },
         'session revoked',
       );
+      // Closes F-009's loop: the revocation outlives the session row it
+      // removed, so "I ended a session I did not recognise" is still
+      // answerable months later. No public id in the row — the four columns
+      // are who, what, when, and nothing else (ADR 0025).
+      await recordAuditEvent(request, db, metrics, {
+        userId: request.user!.id,
+        action: 'session.revoked',
+        outcome: 'success',
+      });
       return reply.status(204).send(null);
     },
   );
@@ -167,6 +180,16 @@ export function registerSessionRoutes(
         { session: { action: 'revoke', scope: 'others', count: deleted.length } },
         'sessions revoked',
       );
+      // Recorded even at zero rows, exactly as the 204 is returned at zero
+      // rows: the event is "everything was signed out at T", which is the
+      // answer a user needs months later, and it does not depend on how many
+      // rows happened to be alive at the time. The count stays in the counter,
+      // which is the place with no retention window.
+      await recordAuditEvent(request, db, metrics, {
+        userId: request.user!.id,
+        action: 'session.revoked_others',
+        outcome: 'success',
+      });
       // 204 always, even at zero rows: the client already knows which rows it
       // listed and removes them without a refetch (ADR 0008).
       return reply.status(204).send(null);

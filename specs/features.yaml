@@ -180,10 +180,29 @@ features:
     deps: [F-003]
     risk_tags: [performance]
 
+  # Split during planning: the API is F-014, the browser screen is F-024 at the
+  # bottom of this file — the same cut F-004/F-017, F-009/F-020, F-010/F-021 and
+  # F-013/F-023 made. Nothing in the browser can see the trail until F-024 ships.
+  # One additive migration: a new `audit_events` table with a composite primary
+  # key `(user_id, created_at, id)` that IS the index for both query paths, so
+  # there is no CREATE INDEX (issue #11 again — and note it is marked closed while
+  # the conflict is still in the code) and NO contract step, ever. The event set
+  # is closed at seven actions on the credential and session lifecycle; todo
+  # operations and email verification are excluded on purpose (ADR 0011). The two
+  # decisions worth reading are ADR 0024 (an audit write is awaited but never
+  # fatal, never inside the transaction it describes, and nothing in the
+  # application reads the log to decide anything — so the trail can have holes,
+  # and audit_write_failures_total is the only counter here whose correct value is
+  # zero) and ADR 0025 (four columns, no `details jsonb`, no IP, no user agent, no
+  # email, 90 days). The line to reject on is the failed-sign-in asymmetry: an
+  # attempt against a KNOWN address writes a row and one against an unknown
+  # address writes nothing, which adds an INSERT to the one branch login works
+  # hard to keep timing-indistinguishable. Bodies and status codes stay identical;
+  # the argument for why timing does not leak is in the spec.
   - id: F-014
     title: Audit log for security-relevant events
     spec: specs/features/F-014-audit-log.md
-    status: todo
+    status: in-progress
     deps: [F-009]
     risk_tags: [security, pii, migration]
 
@@ -298,4 +317,22 @@ features:
     spec: specs/features/F-023-web-search.md
     status: todo
     deps: [F-013, F-016]
+    risk_tags: [frontend]
+
+  # Split out of F-014 (see the comment on it). F-014 records what happens to an
+  # account but ships no way for a browser to show it, so the question it exists
+  # to answer stays unanswerable until this lands. Owns the activity screen, the
+  # empty state, the human-readable labels, and the browser journey. Plan this one
+  # only after F-014 has been reviewed. It carries three constraints from F-014:
+  # `action` and `outcome` are OPAQUE STRINGS on the wire, not enums, because a
+  # newer server can send a value an older client has never seen and a declared
+  # enum would be a rolling-deploy 500 — so the screen needs a safe fallback; the
+  # absence of an event is NOT proof that nothing happened (ADR 0024), which the
+  # copy must survive; and the trail starts when F-014 shipped, so every existing
+  # account opens this screen to an empty list on day one.
+  - id: F-024
+    title: Web UI — account activity screen
+    spec: specs/features/F-024-web-account-activity.md
+    status: todo
+    deps: [F-014, F-006]
     risk_tags: [frontend]

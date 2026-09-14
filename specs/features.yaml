@@ -202,7 +202,7 @@ features:
   - id: F-014
     title: Audit log for security-relevant events
     spec: specs/features/F-014-audit-log.md
-    status: in-progress
+    status: done
     deps: [F-009]
     risk_tags: [security, pii, migration]
 

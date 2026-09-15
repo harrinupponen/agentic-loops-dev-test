@@ -1020,6 +1020,81 @@
         }
       }
     },
+    "/api/auth/export": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "description": "Everything this application stores about the caller, as a streamed `application/x-ndjson` document: one object per line, each carrying a `type`, in the order export, account, todo, session, audit_event, end. Rows within a section are oldest first. The last line is `{\"type\":\"end\",\"counts\":{...}}`; a document that does not end with it is incomplete and must be discarded, because a failure after the first byte cannot change a status line that is already 200. Soft-deleted todos are included with `deletedAt` set. Password hashes, session token hashes, recovery tokens and the idempotency cache are never included. Five requests per hour per account.",
+        "responses": {
+          "200": {
+            "description": "The account as newline-delimited JSON. Not a single JSON object: parse it line by line. A document whose last line is not {\"type\":\"end\",...} is truncated and must be discarded.",
+            "content": {
+              "application/x-ndjson": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Default Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string"
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "details": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string"
+                              },
+                              "message": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "message"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "requestId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error",
+                    "requestId"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/todos": {
       "get": {
         "tags": [

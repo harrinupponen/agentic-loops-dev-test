@@ -233,7 +233,7 @@ features:
   - id: F-015
     title: Data export (GDPR access and portability)
     spec: specs/features/F-015-data-export.md
-    status: spec
+    status: in-progress
     deps: [F-014]
     risk_tags: [pii, security, legal]
 

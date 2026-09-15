@@ -206,10 +206,34 @@ features:
     deps: [F-009]
     risk_tags: [security, pii, migration]
 
+  # Split during planning: this entry was "account deletion AND data export",
+  # which is two independent server features with two different irreversible
+  # edges. F-015 keeps the EXPORT; deletion is F-025 at the bottom of this file,
+  # deps: [F-015]. Export ships first on purpose and that ordering is the line to
+  # reject on: shipping erasure before a user can retrieve anything means a user
+  # who deletes on day one and then asks for their data gets nothing, forever,
+  # with no rollback anywhere in the system. The spec file was renamed to match.
+  # One endpoint, GET /api/auth/export, and NO migration at all — no table, no
+  # column, no index, so this is the first feature since F-010 that does not have
+  # to route around issue #11 (still closed, still live in the code). The two
+  # decisions worth reading are ADR 0026 (the export is a streamed NDJSON document
+  # read in bounded keyset batches, because one unbounded SELECT plus
+  # JSON.stringify against an account with no row cap is a 503 for everyone else
+  # via under-pressure — and so a mid-stream failure cannot be reported, which is
+  # why the last line is a terminator and why account_exports_total counts
+  # `started` and `completed` separately) and ADR 0027 (the export is an allowlist:
+  # every table is exported or refused BY NAME, and nothing that authenticates
+  # anybody is ever exported — no password hash, no session token hash, neither
+  # recovery-token table). `idempotency_keys` is refused too, and that is the
+  # judgement call to push on: response_body is a 24-hour jsonb copy of the user's
+  # own todos. It adds one audit action, account.exported, opening F-014's closed
+  # set by the path ADR 0025 defined. No browser surface, and deliberately no web
+  # backlog entry either — one account-settings screen serves both the download
+  # link and F-025's delete button, so F-025's plan should own that id.
   - id: F-015
-    title: Account deletion and data export (GDPR)
-    spec: specs/features/F-015-account-deletion.md
-    status: todo
+    title: Data export (GDPR access and portability)
+    spec: specs/features/F-015-data-export.md
+    status: spec
     deps: [F-014]
     risk_tags: [pii, security, legal]
 
@@ -336,3 +360,26 @@ features:
     status: todo
     deps: [F-014, F-006]
     risk_tags: [frontend]
+
+  # Split out of F-015 (see the comment on it). F-015 lets a user take a copy of
+  # everything and gives them no way to make it stop existing — Art. 20 without
+  # Art. 17. `deps: [F-015]` rather than [F-014] on purpose: the dependency is the
+  # shipping order, not a technical one, and it is there so the order survives the
+  # planning PR. Plan this one only after F-015 has been reviewed. It carries four
+  # notes from F-015, none of them decisions for it: every foreign key to `users`
+  # already cascades, so deletion likely needs no migration and no soft-delete
+  # column; a GRACE PERIOD CANNOT BE BUILT with ADR 0017's mechanism, because that
+  # sweep runs on the request path of the account that made the rows and a deleted
+  # account makes no requests — deferred deletion means a scheduler, which means
+  # superseding ADR 0017; the account's audit trail dies with the account, so an
+  # `account.deleted` row would be destroyed by the operation it records and a
+  # counter is the only durable signal; and it should require the password again,
+  # for exactly the reason F-015 argued that export does not. This is the only
+  # irreversible operation in the application, and a stolen session cookie plus
+  # this endpoint destroys the evidence of the theft along with everything else.
+  - id: F-025
+    title: Account deletion (GDPR erasure)
+    spec: specs/features/F-025-account-deletion.md
+    status: todo
+    deps: [F-015]
+    risk_tags: [pii, security, legal, auth]

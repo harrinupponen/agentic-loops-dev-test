@@ -286,10 +286,31 @@ features:
   # `<APP_BASE_URL>/#reset=<token>` — a FRAGMENT, last, with nothing after the
   # token (ADR 0028). A link carrying the token anywhere else in the URL lands on
   # a page that ignores it.
+  # Split during planning: the comment above claimed this owns the "password
+  # changed" notification too, and the verification half of "both mail flows".
+  # Neither survived the design. The notification is F-027 (a third Mailer method,
+  # a change to CODEOWNERS-protected src/routes/auth.ts, and its own questions),
+  # and the verification mail is WITHHELD by the delivering transport until F-026
+  # builds a screen that can consume its token — `POST /api/auth/verify-email/
+  # confirm` takes the token in a BODY, so a verification link today loads the app
+  # and does nothing, which is exactly the lie F-017 refused to ship. See ADR 0030
+  # and the spec's "Backlog split". What ships here is the one thing F-017 is
+  # waiting for: password-reset mail that arrives.
+  # No migration, no route, no schema, no openapi.json change, and NO new npm
+  # dependency — the transport is ~40 lines of `fetch` against the provider's
+  # HTTPS API (ADR 0029), which is also the line to reject on if you would rather
+  # buy portability with `nodemailer` over SMTP. Ships inert: every environment
+  # stays on MAIL_TRANSPORT=drop and enabling it is a Sevalla env change, so "the
+  # code is live" and "mail is live" stay separately reversible, the same cut
+  # F-011/F-012 made. The human prerequisites are real and block the rollout, not
+  # the merge: a provider account, a DOMAIN whose DNS this project controls (a
+  # *.sevalla.app hostname cannot be DKIM-verified, so there is no legitimate
+  # MAIL_FROM without one), and a data processing agreement — the address is
+  # disclosed to a new processor.
   - id: F-018
     title: Real outbound mail transport
     spec: specs/features/F-018-mail-transport.md
-    status: todo
+    status: in-progress
     deps: [F-004, F-005]
     risk_tags: [email, infra, security]
 
@@ -407,3 +428,39 @@ features:
     status: todo
     deps: [F-015]
     risk_tags: [pii, security, legal, auth]
+
+  # Split out of F-018 (see the comment on it). F-005 issues a verification token
+  # and `POST /api/auth/verify-email/confirm` consumes one, but the token travels
+  # in a BODY and nothing in a browser can post it — so F-018's delivering
+  # transport WITHHOLDS the verification kind rather than mailing a link that
+  # loads the app and does nothing (ADR 0030, rule 2). This is the web half F-005
+  # never got, the same cut F-004/F-017 made, and it owns deleting that rule. Plan
+  # it only after F-018 has been reviewed. It carries two constraints: the
+  # fragment mechanism is ADR 0028's (`<APP_BASE_URL>/#verify=<token>`, scrubbed
+  # with history.replaceState, consumed only by a POST), and this is the SECOND
+  # caller of that parsing — ADR 0028 deliberately did not abstract it for the
+  # first. Until this ships, users.email_verified_at stays NULL for every account
+  # in production, which breaks nothing (ADR 0011) and is the whole of F-005's
+  # user-visible value.
+  - id: F-026
+    title: Web UI — email verification screen
+    spec: specs/features/F-026-web-email-verification.md
+    status: todo
+    deps: [F-005, F-006, F-018]
+    risk_tags: [frontend, auth]
+
+  # Split out of F-018 (see the comment on it), which is where F-004 and F-005
+  # had each parked it in turn. A reset changes a credential and revokes every
+  # session and the owner is told nothing; this tells them. It is a third Mailer
+  # method, a change to CODEOWNERS-protected src/routes/auth.ts, a new metric
+  # `kind`, and its own copy decision — what a victim is told to do in an
+  # application with no support address — none of which is the transport, and
+  # none of which F-017 is waiting for. Plan it only after F-018 has been
+  # reviewed. Inert under MAIL_TRANSPORT=drop, so it is worth nothing until F-018
+  # is switched on in production.
+  - id: F-027
+    title: '"Your password was changed" notification mail'
+    spec: specs/features/F-027-password-changed-notification.md
+    status: todo
+    deps: [F-018]
+    risk_tags: [email, security, auth]

@@ -99,6 +99,14 @@ target.
 | `TODO_LIST_CACHE_ENABLED`     | **leave unset** — defaults to `false`, see below |
 | `TODO_LIST_CACHE_TTL_SECONDS` | **leave unset** — defaults to `30`               |
 
+| Variable          | Value                                              |
+| ----------------- | -------------------------------------------------- |
+| `MAIL_TRANSPORT`  | `drop` in every environment today — see below      |
+| `RESEND_API_KEY`  | **leave unset** until the mail rollout is run      |
+| `MAIL_FROM`       | **leave unset** until a sending domain is verified |
+| `APP_BASE_URL`    | **leave unset** until then                         |
+| `MAIL_TIMEOUT_MS` | **leave unset** — defaults to `4000`               |
+
 `ALLOWED_ORIGINS` must be set **before** a revision that ships the browser client
 is deployed. An empty value disables the CSRF origin check, so the app refuses to
 start while serving the client without it: the container never becomes ready and
@@ -152,6 +160,46 @@ that also switches off distributed rate limiting.
 content — live outside Postgres. See
 `docs/adr/0020-a-cache-invalidates-a-user-not-a-page.md` and
 `docs/adr/0021-an-unreachable-cache-is-a-cache-miss.md`.
+
+`MAIL_TRANSPORT` selects what happens to the password-reset and verification
+messages the auth flows dispatch, and **every environment runs `drop` — nothing
+is delivered today**. The code for a delivering transport is present (F-018) and
+completely inert until the variable says otherwise: with `drop`, none of the
+four keys above is read and none of their boot rules can fire.
+
+Turning it on is an environment change plus a redeploy, never a merge, and it
+has human prerequisites that no deploy can satisfy for you: a provider account, a
+**sending domain whose DNS this project controls, verified with the DKIM and SPF
+records the provider issues** (a `*.sevalla.app` hostname cannot be verified, and
+mail from an unverified sender is refused or spam-filed), a signed data
+processing agreement plus a privacy-notice update naming the sub-processor, and
+one sending-scoped API key **per environment**.
+
+Then, staging first, in one update: `MAIL_TRANSPORT=resend`, `RESEND_API_KEY`,
+`MAIL_FROM`, `APP_BASE_URL=<STAGING_URL>`. Redeploy. If any is missing or
+malformed the container refuses to start and Sevalla holds the previous
+revision — safe, and the boot error names the variable. Confirm from the `mail
+transport ready` line that it reads `transport: resend` with the right
+`appBaseUrl`, then complete one real reset from a mailbox you control, then watch
+`mail_messages_total`. Production follows after 24 clean hours, with the second
+key and `APP_BASE_URL=<PRODUCTION_URL>`.
+
+Two things to expect on that counter. `outcome="suppressed"` will dominate on
+staging and is not a fault: the Playwright suite registers `@example.com`
+addresses, and a delivering transport never sends to a reserved domain, because
+a stream of hard bounces gets provider accounts suspended and the suspension
+would land on password reset. Verification mail is withheld everywhere until the
+screen that can consume its link exists (F-026). The page-worthy series is
+`outcome="failed"` — the user already has their `202`, so nothing else surfaces a
+delivery failure. See `docs/adr/0029-mail-leaves-over-the-providers-https-api.md`
+and `docs/adr/0030-a-transport-may-decline-to-send.md`.
+
+**Rollback is one variable:** set `MAIL_TRANSPORT=drop` and redeploy. No code
+change, no migration to undo, and the application returns to exactly today's
+behaviour. Leaving `RESEND_API_KEY` in place does not fail that boot, by design —
+it is reported as `unusedMailCredential: true` on the boot line instead. If the
+problem is the link rather than delivery, `APP_BASE_URL` is separately
+correctable without touching the transport.
 
 **GitHub secrets:** `SEVALLA_TOKEN` (from app.sevalla.com/api-keys).
 

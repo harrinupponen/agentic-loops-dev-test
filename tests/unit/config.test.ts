@@ -217,6 +217,137 @@ describe('loadConfig', () => {
     expect(config.TODO_LIST_CACHE_TTL_SECONDS).toBe(30);
   });
 
+  // --- the delivering mail transport (F-018) ---------------------------------
+  // All five rules are ADR 0007 shaped: they throw in EVERY NODE_ENV, because a
+  // transport that cannot compose a usable link is not a degraded transport, it
+  // is one that mails users a dead end. None of them can fire while
+  // MAIL_TRANSPORT is console or drop.
+
+  it('refuses a delivering transport without its credential', () => {
+    const resend = { ...base, MAIL_TRANSPORT: 'resend' };
+    expect(() =>
+      loadConfig({ ...resend, MAIL_FROM: 'a@b.example', APP_BASE_URL: 'https://app.example' }),
+    ).toThrow(/RESEND_API_KEY/);
+    expect(() =>
+      loadConfig({ ...resend, RESEND_API_KEY: 'k', APP_BASE_URL: 'https://app.example' }),
+    ).toThrow(/MAIL_FROM/);
+    expect(() => loadConfig({ ...resend, RESEND_API_KEY: 'k', MAIL_FROM: 'a@b.example' })).toThrow(
+      /APP_BASE_URL/,
+    );
+  });
+
+  it('never echoes the mail credential in the boot error', () => {
+    const secret = 'test-key-not-a-real-credential';
+    try {
+      loadConfig({ ...base, MAIL_TRANSPORT: 'resend', RESEND_API_KEY: secret });
+      expect.unreachable('expected a boot failure');
+    } catch (err) {
+      expect((err as Error).message).not.toContain(secret);
+    }
+  });
+
+  it('refuses a base URL that would produce an unusable link', () => {
+    const resend = {
+      ...base,
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'k',
+      MAIL_FROM: 'Agentic Todo <noreply@app.example>',
+    };
+    for (const APP_BASE_URL of [
+      '/app',
+      'app.example',
+      'https://app.example/console',
+      'https://app.example/?utm=1',
+      'https://app.example/#already',
+      'ftp://app.example',
+    ]) {
+      expect(() => loadConfig({ ...resend, APP_BASE_URL })).toThrow(/APP_BASE_URL/);
+    }
+    expect(loadConfig({ ...resend, APP_BASE_URL: 'https://app.example/' }).APP_BASE_URL).toBe(
+      'https://app.example/',
+    );
+    expect(loadConfig({ ...resend, APP_BASE_URL: 'http://localhost:3000' }).APP_BASE_URL).toBe(
+      'http://localhost:3000',
+    );
+  });
+
+  it('refuses a plaintext base URL to a non-loopback host in production', () => {
+    const resend = {
+      ...base,
+      NODE_ENV: 'production',
+      METRICS_TOKEN: 'm'.repeat(32),
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'k',
+      MAIL_FROM: 'Agentic Todo <noreply@app.example>',
+    };
+    expect(() => loadConfig({ ...resend, APP_BASE_URL: 'http://app.example' })).toThrow(
+      /APP_BASE_URL/,
+    );
+    expect(loadConfig({ ...resend, APP_BASE_URL: 'https://app.example' }).APP_BASE_URL).toBe(
+      'https://app.example',
+    );
+  });
+
+  it('refuses a MAIL_FROM without an @ or with a newline', () => {
+    const resend = {
+      ...base,
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'k',
+      APP_BASE_URL: 'https://app.example',
+    };
+    expect(() => loadConfig({ ...resend, MAIL_FROM: 'Agentic Todo' })).toThrow(/MAIL_FROM/);
+    expect(() =>
+      loadConfig({ ...resend, MAIL_FROM: 'a@b.example\nBcc: someone@else.example' }),
+    ).toThrow(/MAIL_FROM/);
+  });
+
+  it('refuses a retry budget that does not fit inside the shutdown grace', () => {
+    const resend = {
+      ...base,
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'k',
+      MAIL_FROM: 'a@b.example',
+      APP_BASE_URL: 'https://app.example',
+    };
+    // 2 × 5000 + 1000 = 11s against a 10s grace: a SIGTERM would kill an
+    // in-flight retry, invisibly.
+    expect(() => loadConfig({ ...resend, MAIL_TIMEOUT_MS: '5000' })).toThrow(/MAIL_TIMEOUT_MS/);
+    expect(() => loadConfig({ ...resend, MAIL_TIMEOUT_MS: '5000' })).toThrow(/SHUTDOWN_GRACE_MS/);
+    expect(
+      loadConfig({ ...resend, MAIL_TIMEOUT_MS: '5000', SHUTDOWN_GRACE_MS: '11000' })
+        .MAIL_TIMEOUT_MS,
+    ).toBe(5000);
+    expect(loadConfig(resend).MAIL_TIMEOUT_MS).toBe(4000);
+  });
+
+  it('rejects a MAIL_TIMEOUT_MS outside 100..10000', () => {
+    expect(() => loadConfig({ ...base, MAIL_TIMEOUT_MS: '99' })).toThrow(/MAIL_TIMEOUT_MS/);
+    expect(() => loadConfig({ ...base, MAIL_TIMEOUT_MS: '10001' })).toThrow(/MAIL_TIMEOUT_MS/);
+  });
+
+  // Deliberately NOT a boot failure, unlike OTEL_EXPORTER_OTLP_HEADERS: the
+  // rollback for a misbehaving transport must be one variable. A rollback that
+  // also required unsetting the key would refuse the boot at 2am and leave the
+  // previous revision — still sending — in service.
+  it('boots with an unused mail credential and does not require the other keys', () => {
+    const config = loadConfig({
+      ...base,
+      MAIL_TRANSPORT: 'drop',
+      RESEND_API_KEY: 'test-key-not-a-real-credential',
+    });
+    expect(config.MAIL_TRANSPORT).toBe('drop');
+    expect(config.MAIL_FROM).toBe('');
+    expect(config.APP_BASE_URL).toBe('');
+  });
+
+  it('leaves every mail key inert on the existing transports', () => {
+    for (const MAIL_TRANSPORT of ['console', 'drop']) {
+      const config = loadConfig({ ...base, MAIL_TRANSPORT, APP_BASE_URL: 'not-a-url' });
+      expect(config.MAIL_TRANSPORT).toBe(MAIL_TRANSPORT);
+      expect(config.RESEND_API_KEY).toBe('');
+    }
+  });
+
   it('parses the origin allowlist', () => {
     const config = loadConfig({ ...base, ALLOWED_ORIGINS: 'https://a.com, https://b.com ,' });
     expect(allowedOrigins(config)).toEqual(['https://a.com', 'https://b.com']);

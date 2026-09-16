@@ -3,6 +3,7 @@ import client from 'prom-client';
 import type { Config } from '../config.js';
 import { bearerToken, bearerTokenMatches } from '../lib/bearer-auth.js';
 import { unauthorized } from '../lib/errors.js';
+import { mailTransportStatus } from '../lib/mailer.js';
 import { rateLimitStoreOperations } from '../lib/rate-limit-store.js';
 import { todoListCacheOperations } from '../lib/todo-list-cache.js';
 import { spansExported, tracingStatus } from '../telemetry.js';
@@ -248,6 +249,13 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     },
     'todo list cache ready',
   );
+
+  // "Is mail live right now, and where do its links point" must be answerable
+  // from the logs without reading the environment — the same reason the two
+  // lines above exist. `verificationWithheld` states ADR 0030 rule 2 out loud,
+  // and `unusedMailCredential` is how the boot rule deliberately NOT written
+  // (a credential with nothing to use it) stays visible. Never the key itself.
+  app.log.info(mailTransportStatus(config), 'mail transport ready');
 
   app.get(
     '/metrics',

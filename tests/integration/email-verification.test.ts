@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { Writable } from 'node:stream';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { emailVerificationTokens, users } from '../../src/db/schema.js';
 import type { Mailer } from '../../src/lib/mailer.js';
 import { generateRecoveryToken, hashRecoveryToken } from '../../src/lib/recovery-token.js';
@@ -528,6 +528,46 @@ describe('email verification — operational surface', () => {
       );
     } finally {
       await dropped.close();
+    }
+  });
+
+  // F-018 / ADR 0030 rule 2: the confirm route takes its token in a request
+  // body and no browser surface exists that can post one, so a verification
+  // mail today would carry a link that loads the app and does nothing. F-026
+  // builds that screen and deletes this behaviour.
+  it('the delivering transport withholds verification mail', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const delivering = await createTestContext({
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'test-key-not-a-real-credential',
+      MAIL_FROM: 'Agentic Todo <noreply@app.example>',
+      APP_BASE_URL: 'https://app.example',
+      MAIL_TIMEOUT_MS: '100',
+      SHUTDOWN_GRACE_MS: '1200',
+      AUTH_RATE_LIMIT_MAX: '10000',
+    });
+    try {
+      await resetDb(delivering.db);
+      const registered = await delivering.app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        payload: { email: 'withheld@example.com', password: PASSWORD },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Registration is unchanged: 201, and the token row is still written.
+      expect(registered.statusCode).toBe(201);
+      expect(await delivering.db.select().from(emailVerificationTokens)).toHaveLength(1);
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      const metrics = await delivering.app.inject({ url: '/metrics', headers: metricsAuth() });
+      expect(metrics.body).toMatch(
+        /mail_messages_total\{kind="email_verification",transport="resend",outcome="suppressed"\}\s+1\b/,
+      );
+      expect(metrics.body).not.toMatch(/transport="resend",outcome="sent"/);
+    } finally {
+      fetchSpy.mockRestore();
+      await delivering.close();
     }
   });
 

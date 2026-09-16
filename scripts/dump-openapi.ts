@@ -28,6 +28,12 @@ const config: Config = {
   // `drop` rather than the `console` default: this script must never be the
   // thing that prints a token, and it sends no mail anyway.
   MAIL_TRANSPORT: 'drop',
+  // Inert under `drop`, and none of them is read: no key, no sender, no link
+  // origin, and therefore nothing this script could leak into the spec.
+  RESEND_API_KEY: '',
+  MAIL_FROM: '',
+  APP_BASE_URL: '',
+  MAIL_TIMEOUT_MS: 4000,
   // Empty is what a developer machine runs; `/metrics` is hidden from the
   // contract either way, so the token state cannot affect this dump.
   METRICS_TOKEN: '',

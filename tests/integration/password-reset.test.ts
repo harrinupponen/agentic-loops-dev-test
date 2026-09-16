@@ -1,6 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
 import { Writable } from 'node:stream';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { passwordResetTokens } from '../../src/db/schema.js';
 import type { Mailer } from '../../src/lib/mailer.js';
 import { generateRecoveryToken, hashRecoveryToken } from '../../src/lib/recovery-token.js';
@@ -403,6 +403,129 @@ describe('password reset — operational surface', () => {
       const ok = await createTestContext({ NODE_ENV, MAIL_TRANSPORT: 'console' });
       await ok.close();
     }
+  });
+
+  // --- F-018: what a delivering transport does to the request ---------------
+  // No provider and no network in any of these: the seam is the injected fake
+  // (ADR 0010), except for the reserved-domain case, which boots the REAL
+  // transport and proves it never reaches for the network at all.
+
+  it('a failing mailer does not fail the request', async () => {
+    const failing: Mailer = {
+      transport: 'broken',
+      sendPasswordReset: () => Promise.reject(new Error('the mail provider refused: status 500')),
+      sendEmailVerification: () => Promise.resolve(),
+    };
+    const broken = await createTestContext(
+      { PASSWORD_RESET_RATE_LIMIT_MAX: '10000', AUTH_RATE_LIMIT_MAX: '10000' },
+      { mailer: failing },
+    );
+    try {
+      await resetDb(broken.db);
+      await registerUser(broken.app, 'unreachable@example.com');
+
+      const res = await broken.app.inject({
+        method: 'POST',
+        url: '/api/auth/password-reset',
+        payload: { email: 'unreachable@example.com' },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      // Fail-open, and not merely undesirable to do otherwise: a status that
+      // differed on the known-address branch is the enumeration oracle the
+      // identical response exists to close.
+      expect(res.statusCode).toBe(202);
+      expect(await broken.db.select().from(passwordResetTokens)).toHaveLength(1);
+
+      const metrics = await broken.app.inject({ url: '/metrics', headers: metricsAuth() });
+      expect(metrics.body).toMatch(
+        /mail_messages_total\{kind="password_reset",transport="broken",outcome="failed"\}\s+[1-9]/,
+      );
+    } finally {
+      await broken.close();
+    }
+  });
+
+  it('a mailer that never settles does not delay the response', async () => {
+    const hanging: Mailer = {
+      transport: 'hanging',
+      sendPasswordReset: () => new Promise<void>(() => {}),
+      sendEmailVerification: () => Promise.resolve(),
+    };
+    const stuck = await createTestContext(
+      { PASSWORD_RESET_RATE_LIMIT_MAX: '10000', AUTH_RATE_LIMIT_MAX: '10000' },
+      { mailer: hanging },
+    );
+    try {
+      await resetDb(stuck.db);
+      await registerUser(stuck.app, 'hanging@example.com');
+
+      const started = Date.now();
+      const res = await stuck.app.inject({
+        method: 'POST',
+        url: '/api/auth/password-reset',
+        payload: { email: 'hanging@example.com' },
+      });
+
+      // The send is dispatched, never awaited: the provider's latency is not on
+      // the response path, and http_request_duration_seconds must not track it.
+      expect(res.statusCode).toBe(202);
+      expect(Date.now() - started).toBeLessThan(2000);
+    } finally {
+      await stuck.close();
+    }
+  });
+
+  it('a declined send counts suppressed rather than sent', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    // The real transport, selected by configuration, with real credentials'
+    // shape and a fake value. Every address in this suite is @example.com, so
+    // ADR 0030 rule 1 guarantees nothing can leave even if the spy failed.
+    const delivering = await createTestContext({
+      MAIL_TRANSPORT: 'resend',
+      RESEND_API_KEY: 'test-key-not-a-real-credential',
+      MAIL_FROM: 'Agentic Todo <noreply@app.example>',
+      APP_BASE_URL: 'https://app.example',
+      MAIL_TIMEOUT_MS: '100',
+      SHUTDOWN_GRACE_MS: '1200',
+      PASSWORD_RESET_RATE_LIMIT_MAX: '10000',
+      AUTH_RATE_LIMIT_MAX: '10000',
+    });
+    try {
+      await resetDb(delivering.db);
+      await registerUser(delivering.app, 'suppressed@example.com');
+
+      const res = await delivering.app.inject({
+        method: 'POST',
+        url: '/api/auth/password-reset',
+        payload: { email: 'suppressed@example.com' },
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(res.statusCode).toBe(202);
+
+      const metrics = await delivering.app.inject({ url: '/metrics', headers: metricsAuth() });
+      expect(metrics.body).toMatch(
+        /mail_messages_total\{kind="password_reset",transport="resend",outcome="suppressed"\}\s+1\b/,
+      );
+      // The series that must NOT move: a withheld message is not a delivered one.
+      expect(metrics.body).not.toMatch(/transport="resend",outcome="sent"/);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      await delivering.close();
+    }
+  });
+
+  it('the delivering transport refuses to boot without its credential', async () => {
+    await expect(createTestContext({ MAIL_TRANSPORT: 'resend' })).rejects.toThrow(/RESEND_API_KEY/);
+    await expect(
+      createTestContext({
+        MAIL_TRANSPORT: 'resend',
+        RESEND_API_KEY: 'test-key-not-a-real-credential',
+        MAIL_FROM: 'Agentic Todo <noreply@app.example>',
+        APP_BASE_URL: 'https://app.example/console',
+      }),
+    ).rejects.toThrow(/APP_BASE_URL/);
   });
 
   it('the drop transport keeps the API surface intact', async () => {

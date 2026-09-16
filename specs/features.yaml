@@ -246,15 +246,34 @@ features:
     deps: [F-006]
     risk_tags: [frontend]
 
-  # Split out of F-004 (see the comment on it). Plan this one only after F-004
-  # has been reviewed, so it inherits whatever the human changed about the API,
-  # and only once a real mail transport exists — F-004 ships with
-  # MAIL_TRANSPORT=drop in production, so these screens would be unusable there.
+  # Split out of F-004 (see the comment on it). Planned against F-004 and F-006
+  # as shipped. `deps` GAINED F-018 during planning, and that is the line to
+  # reject on: production runs MAIL_TRANSPORT=drop, so merging a "Forgot your
+  # password?" link before a real transport exists gives a locked-out user a form
+  # that answers "a reset link is on its way" when nothing will ever arrive —
+  # worse than today's no path at all. It is an ORDERING dependency, not a
+  # technical one (nothing here imports anything F-018 builds), recorded in the
+  # field the orchestrator reads for the same reason F-025's was. Delete F-018
+  # from the line if you would rather have the screens on staging early.
+  # No API change, no migration, no config key, no new dependency, no
+  # CODEOWNERS-protected file: markup plus two browser modules. The decision
+  # worth reading is ADR 0028 — the link is `<APP_BASE_URL>/#reset=<token>`, a
+  # FRAGMENT, so the token is never sent to a server at all (not a query string,
+  # per F-004's constraint), the page scrubs it with history.replaceState before
+  # rendering, and only a POST with a password consumes it, so a mail scanner or
+  # a prefetch cannot burn a single-use token. The cost is that a reload loses
+  # the token. The other thing to scrutinise is the test plan: the
+  # request → reset → sign in browser journey the stub asked for CANNOT be built
+  # (the raw token lives only inside the Mailer, the same specs run against
+  # staging where there is no database and no stdout, and test.skip is forbidden),
+  # so the happy path is covered by unit decisions plus F-004's existing
+  # integration cases, and NO e2e submits the request form — 5/hour per IP is one
+  # of the two limits staging does not raise.
   - id: F-017
     title: Web UI — password reset screens
     spec: specs/features/F-017-web-password-reset.md
-    status: todo
-    deps: [F-004, F-006]
+    status: in-progress
+    deps: [F-004, F-006, F-018]
     risk_tags: [frontend, auth, security]
 
   # Split out of F-005 (see the comment on it). Until this ships, both mail flows
@@ -262,6 +281,11 @@ features:
   # receives and F-005 verifies addresses nobody can confirm. Owns the provider
   # adapter, APP_BASE_URL and the link format, bounce/retry handling, and the
   # "your password was changed" notification F-004 parked on F-005.
+  # F-017's planning added this entry to F-017's deps, so this now GATES the
+  # reset screens, and it fixed the link format F-018 must compose:
+  # `<APP_BASE_URL>/#reset=<token>` — a FRAGMENT, last, with nothing after the
+  # token (ADR 0028). A link carrying the token anywhere else in the URL lands on
+  # a page that ignores it.
   - id: F-018
     title: Real outbound mail transport
     spec: specs/features/F-018-mail-transport.md

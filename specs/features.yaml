@@ -272,7 +272,7 @@ features:
   - id: F-017
     title: Web UI — password reset screens
     spec: specs/features/F-017-web-password-reset.md
-    status: spec
+    status: in-progress
     deps: [F-004, F-006, F-018]
     risk_tags: [frontend, auth, security]
 

@@ -22,7 +22,15 @@ export type AuditAction =
   | 'password_reset.requested'
   | 'password_reset.completed'
   | 'session.revoked'
-  | 'session.revoked_others';
+  | 'session.revoked_others'
+  // A single request that extracts everything this application knows about an
+  // account is the most valuable thing an attacker holding a stolen cookie can
+  // do, so it is credential-lifecycle-grade rather than a product operation —
+  // the extension path ADR 0025 left open, taken for the first time. The row is
+  // written before the first byte of the stream, so `success` means the request
+  // was authorized and the export began; whether the download finished is
+  // account_exports_total's job, not this log's.
+  | 'account.exported';
 
 export type AuditOutcome = 'success' | 'failure';
 

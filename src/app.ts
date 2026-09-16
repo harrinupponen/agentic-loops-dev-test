@@ -24,6 +24,7 @@ import { registerErrorHandler } from './plugins/errors.js';
 import { registerIdempotency } from './plugins/idempotency.js';
 import { registerMetrics } from './plugins/metrics.js';
 import { registerTracing } from './plugins/tracing.js';
+import { registerAccountRoutes } from './routes/account.js';
 import { registerAuditRoutes } from './routes/audit.js';
 import { registerAuthRoutes } from './routes/auth.js';
 import { registerHealthRoutes } from './routes/health.js';
@@ -304,6 +305,10 @@ export async function buildApp(
   // routes are: src/routes/auth.ts is large and CODEOWNERS-protected, and this
   // feature's surface should be reviewable on its own.
   registerAuditRoutes(app, db);
+  // Also under the `auth` tag and in its own file, for the same reason: the
+  // account-lifecycle surface (F-025 adds DELETE /api/auth/account beside the
+  // export) should be reviewable on its own.
+  registerAccountRoutes(app, db, metrics);
   const todoListCache = cacheRedis ? createTodoListCache(cacheRedis, config, app.log) : null;
   registerTodoRoutes(app, db, idempotency, metrics, todoListCache);
   // Last, and able to refuse the boot: see the two rules in src/routes/web.ts.

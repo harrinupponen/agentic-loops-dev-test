@@ -168,6 +168,33 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     registers: [registry],
   });
 
+  // Two labels for one request, deliberately: `started` increments before the
+  // first byte and `completed` after the terminator is written, so
+  // `started - completed` is the number of exports that died mid-stream — the
+  // one failure the HTTP status code cannot carry, because it is already 200 by
+  // then (ADR 0026). `failed` increments when a batch query throws, which
+  // separates "the server broke" from "the client hung up". Three series, no
+  // user id and no email as a label.
+  const accountExports = new client.Counter({
+    name: 'account_exports_total',
+    help: 'Account data exports by outcome',
+    labelNames: ['outcome'],
+    registers: [registry],
+  });
+
+  // Over the whole stream, bucketed like todo_search_duration_seconds so the
+  // two read the same way. It measures what http_request_duration_seconds
+  // cannot measure honestly: that histogram observes reply.elapsedTime, which
+  // for a streamed response includes the client's download time, so a user on a
+  // slow link is indistinguishable from a slow query. A p95 rising while the
+  // row counts are flat means the batch loop is the suspect.
+  const accountExportDuration = new client.Histogram({
+    name: 'account_export_duration_seconds',
+    help: 'Account data export duration in seconds',
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5],
+    registers: [registry],
+  });
+
   app.addHook('onResponse', (request, reply, done) => {
     // routerPath keeps cardinality bounded (`/api/todos/:id`, not one label per uuid).
     const route = request.routeOptions.url ?? 'unmatched';
@@ -255,6 +282,8 @@ export function registerMetrics(app: FastifyInstance, config: Config) {
     auditEvents,
     auditWriteFailures,
     auditEventsPurged,
+    accountExports,
+    accountExportDuration,
   };
 }
 

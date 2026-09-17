@@ -41,9 +41,33 @@ export const EnvSchema = z.object({
   /**
    * `console` prints the reset token to stdout for local development and
    * refuses to boot under NODE_ENV=production; `drop` sends nothing and is what
-   * production runs until a real transport exists. See src/lib/mailer.ts.
+   * every deployed environment runs; `resend` delivers over the provider's
+   * HTTPS API (ADR 0029) and is the one value that requires the four keys
+   * below. See src/lib/mailer.ts.
    */
-  MAIL_TRANSPORT: z.enum(['console', 'drop']).default('console'),
+  MAIL_TRANSPORT: z.enum(['console', 'drop', 'resend']).default('console'),
+  /**
+   * **CREDENTIAL.** "Send mail as this domain" for whoever holds it: never
+   * logged, never in an error message, never on a span, never in .env.example.
+   * Inert unless MAIL_TRANSPORT=resend, and a leftover value is a warning
+   * rather than a boot failure — see validateMail for why.
+   */
+  RESEND_API_KEY: z.string().default(''),
+  /** Envelope sender, e.g. `Agentic Todo <noreply@example-domain>`. */
+  MAIL_FROM: z.string().default(''),
+  /**
+   * Absolute origin the emailed links are composed from:
+   * `<APP_BASE_URL>/#reset=<token>` (ADR 0028). A path, a query or a fragment
+   * here silently produces a link the page ignores, so the boot rules refuse
+   * one.
+   */
+  APP_BASE_URL: z.string().default(''),
+  /**
+   * Per attempt, and there are at most two of them. The retry budget
+   * (2 × this + the 1s delay) must fit inside SHUTDOWN_GRACE_MS or a SIGTERM
+   * kills an in-flight retry invisibly; validateMail enforces the relationship.
+   */
+  MAIL_TIMEOUT_MS: z.coerce.number().int().min(100).max(10_000).default(4000),
   /**
    * Bearer token that `/metrics` is served behind. Empty = the endpoint is
    * open, which loadConfig refuses to allow in production; see the check there.
@@ -158,7 +182,104 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
   validateTracing(result.data);
   validateRedis(result.data);
+  validateMail(result.data);
   return result.data;
+}
+
+/** The fixed delay between the one attempt and its one retry. */
+export const MAIL_RETRY_DELAY_MS = 1000;
+
+/**
+ * Five boot rules for a delivering transport, all ADR 0007 shaped and all
+ * throwing in EVERY NODE_ENV: a transport that cannot compose a usable link is
+ * not a degraded transport, it is one that mails users a dead end. Every rule
+ * is unreachable while MAIL_TRANSPORT is `console` or `drop`, which is what
+ * makes shipping this inert possible.
+ *
+ * And one rule deliberately NOT written: RESEND_API_KEY set while the transport
+ * is not `resend` is a warning (see mailTransportStatus), not a boot failure.
+ * The precedent points the other way — OTEL_EXPORTER_OTLP_HEADERS without an
+ * endpoint refuses to boot — and it is departed from on purpose. The rollback
+ * for a misbehaving transport must be one variable: set MAIL_TRANSPORT=drop and
+ * redeploy. If a leftover key also had to be unset, a 2am rollback would be a
+ * boot failure, the container would never become ready, and the platform would
+ * keep serving the previous revision — which is still sending mail.
+ */
+function validateMail(config: Config): void {
+  if (config.MAIL_TRANSPORT !== 'resend') return;
+
+  // Named individually so a deploy that is missing one is told which one. The
+  // key's VALUE is never echoed, here or anywhere else.
+  for (const key of ['RESEND_API_KEY', 'MAIL_FROM', 'APP_BASE_URL'] as const) {
+    if (!config[key]) {
+      throw new Error(
+        `${key} is empty while MAIL_TRANSPORT=resend, so no mail could be sent. ` +
+          'Set it, or set MAIL_TRANSPORT=drop.',
+      );
+    }
+  }
+
+  let base: URL;
+  try {
+    base = new URL(config.APP_BASE_URL);
+  } catch {
+    throw new Error(
+      `APP_BASE_URL is not an absolute URL (got "${config.APP_BASE_URL}"). Emailed links are ` +
+        'composed from it, so it must be an origin such as https://app.example.',
+    );
+  }
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+    throw new Error(
+      `APP_BASE_URL must be an http(s) URL (got "${base.protocol}"). It is the origin a ` +
+        'browser opens from the mail.',
+    );
+  }
+  // The link is `<base>/#reset=<token>` with NOTHING after the token (ADR 0028),
+  // and F-017's client matches the fragment with ^[A-Za-z0-9_-]{43}$. A base
+  // carrying a path, a query or a fragment silently produces a link the page
+  // ignores — a failure visible only as "reset mail does not work".
+  if (base.pathname !== '/' || base.search || base.hash) {
+    throw new Error(
+      'APP_BASE_URL must be a bare origin with no path, query or fragment (got ' +
+        `"${config.APP_BASE_URL}"). The emailed link is <APP_BASE_URL>/#reset=<token>.`,
+    );
+  }
+  // Mirrors the OTLP rule in validateTracing: the fragment carries a recovery
+  // token, and a plaintext origin puts it on the wire the moment it is opened.
+  if (
+    config.NODE_ENV === 'production' &&
+    base.protocol === 'http:' &&
+    !LOOPBACK_HOSTS.has(base.hostname)
+  ) {
+    throw new Error(
+      'APP_BASE_URL uses plaintext http:// to a non-loopback host under NODE_ENV=production; ' +
+        'refusing to boot. The emailed link carries a recovery token.',
+    );
+  }
+
+  // Cheap, and it stops a confusing misconfiguration. The body is JSON, not an
+  // SMTP envelope, so a newline cannot forge a header — but a MAIL_FROM the
+  // provider rejects fails every send with a 4xx that is not retried.
+  if (!config.MAIL_FROM.includes('@')) {
+    throw new Error(
+      `MAIL_FROM does not contain an "@" (got "${config.MAIL_FROM}"). Expected an address, ` +
+        'optionally with a display name: Agentic Todo <noreply@example-domain>.',
+    );
+  }
+  if (/[\r\n]/.test(config.MAIL_FROM)) {
+    throw new Error('MAIL_FROM contains a newline; refusing to boot.');
+  }
+
+  // Enforced rather than trusted to two defaults staying in step, because the
+  // failure it prevents — a SIGTERM killing an in-flight retry — is invisible.
+  const budget = 2 * config.MAIL_TIMEOUT_MS + MAIL_RETRY_DELAY_MS;
+  if (budget > config.SHUTDOWN_GRACE_MS) {
+    throw new Error(
+      `The mail retry budget (2 × MAIL_TIMEOUT_MS + ${MAIL_RETRY_DELAY_MS} = ${budget}ms) ` +
+        `exceeds SHUTDOWN_GRACE_MS (${config.SHUTDOWN_GRACE_MS}ms), so a shutdown would kill ` +
+        'an in-flight retry. Lower MAIL_TIMEOUT_MS or raise SHUTDOWN_GRACE_MS.',
+    );
+  }
 }
 
 /**

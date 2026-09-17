@@ -120,12 +120,25 @@ export function registerAuthRoutes(
 
     void mailer
       .sendEmailVerification({ to: user.email, token, expiresAt })
-      .then(() => {
+      .then((dispatch) => {
+        // A transport may decline to send (ADR 0030) and says so here; a
+        // transport that always delivers says nothing, and that reads as `sent`.
+        // Counting a withheld message as `sent` would make the one counter this
+        // feature is alerted on lie.
+        const outcome = dispatch?.outcome ?? 'sent';
         metrics.mailMessages.inc({
           kind: 'email_verification',
           transport: mailer.transport,
-          outcome: 'sent',
+          outcome,
         });
+        if (dispatch) {
+          // No address, no token, no key, no body — the reason, which is where
+          // ADR 0030 puts it rather than in a label.
+          request.log.info(
+            { mail: { kind: 'email_verification', transport: mailer.transport, ...dispatch } },
+            'mail dispatched',
+          );
+        }
       })
       .catch((err: unknown) => {
         metrics.mailMessages.inc({
@@ -344,12 +357,21 @@ export function registerAuthRoutes(
           // exist. Failure is visible in the counter, not to the caller.
           void mailer
             .sendPasswordReset({ to: email, token, expiresAt })
-            .then(() => {
+            .then((dispatch) => {
+              // See the same block in the verification path: `suppressed` is a
+              // real outcome, and it must not be counted as delivered.
+              const outcome = dispatch?.outcome ?? 'sent';
               metrics.mailMessages.inc({
                 kind: 'password_reset',
                 transport: mailer.transport,
-                outcome: 'sent',
+                outcome,
               });
+              if (dispatch) {
+                request.log.info(
+                  { mail: { kind: 'password_reset', transport: mailer.transport, ...dispatch } },
+                  'mail dispatched',
+                );
+              }
             })
             .catch((err: unknown) => {
               metrics.mailMessages.inc({

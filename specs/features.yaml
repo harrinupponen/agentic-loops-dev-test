@@ -310,7 +310,7 @@ features:
   - id: F-018
     title: Real outbound mail transport
     spec: specs/features/F-018-mail-transport.md
-    status: in-progress
+    status: done
     deps: [F-004, F-005]
     risk_tags: [email, infra, security]
 

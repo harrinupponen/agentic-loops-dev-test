@@ -31,11 +31,18 @@ jobs:
       NODE_ENV: production
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '1000000'
+      # Every soak iteration registers a fresh user; the auth routes have their own
+      # limiter (default 10/min) that RATE_LIMIT_MAX does not cover. Same override
+      # the e2e.yml load-smoke job uses.
+      AUTH_RATE_LIMIT_MAX: '1000000'
       DATABASE_POOL_MAX: '20'
       # `npm run build` below now also builds the browser client, and the app
       # refuses to boot while serving one with an empty origin allowlist
       # (docs/adr/0007-fail-closed-security-config.md).
       ALLOWED_ORIGINS: http://127.0.0.1:3000
+      # The default transport (`console`) refuses to run under NODE_ENV=production
+      # because it prints recovery tokens; the soak sends no real mail.
+      MAIL_TRANSPORT: drop
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

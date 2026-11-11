@@ -31,6 +31,10 @@ jobs:
       NODE_ENV: production
       LOG_LEVEL: error
       RATE_LIMIT_MAX: '1000000'
+      # Every soak iteration registers a fresh user; the auth routes have their own
+      # limiter (default 10/min) that RATE_LIMIT_MAX does not cover. Same override
+      # the e2e.yml load-smoke job uses.
+      AUTH_RATE_LIMIT_MAX: '1000000'
       DATABASE_POOL_MAX: '20'
       # `npm run build` below now also builds the browser client, and the app
       # refuses to boot while serving one with an empty origin allowlist
